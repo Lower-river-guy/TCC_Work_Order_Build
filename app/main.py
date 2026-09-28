@@ -153,6 +153,10 @@ def _parse_operation_request() -> OperationRequest:
             raise ValueError("Upload Custom Work Order Template (.zip) or use the default template.")
         custom_filename = upload.filename
         custom_bytes = upload.read()
+    add_custom = _parse_bool(payload.get("add_custom_work_order", "false"))
+    custom_work_order_name = (payload.get("custom_work_order_name") or "").strip()
+    if add_custom and not custom_work_order_name:
+        raise ValueError("Enter a work order name.")
     return OperationRequest(
         prefix=(payload.get("prefix") or DEFAULT_PREFIX).strip(),
         device=device,
@@ -160,6 +164,8 @@ def _parse_operation_request() -> OperationRequest:
         use_default_template=use_default,
         custom_bytes=custom_bytes,
         custom_filename=custom_filename,
+        add_custom_work_order=add_custom,
+        custom_work_order_name=custom_work_order_name if add_custom else None,
     )
 
 

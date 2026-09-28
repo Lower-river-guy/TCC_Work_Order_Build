@@ -6,6 +6,10 @@ const useDefaultTemplate = document.querySelector("#use-default-template");
 const customTemplateField = document.querySelector("#custom-template-field");
 const customTemplateInput = document.querySelector("#custom-template");
 const prefixInput = document.querySelector("#prefix");
+const addCustomWorkOrder = document.querySelector("#add-custom-work-order");
+const customWorkOrderField = document.querySelector("#custom-work-order-field");
+const customWorkOrderNameInput = document.querySelector("#custom-work-order-name");
+const customWorkOrderPreview = document.querySelector("#custom-work-order-preview");
 const deviceSelect = document.querySelector("#device");
 const projectSelect = document.querySelector("#project");
 const dryRunBox = document.querySelector("#dry-run");
@@ -50,6 +54,10 @@ function buildFormData(extra = {}) {
   if (!useDefaultTemplate.checked && customTemplateInput.files[0]) {
     data.set("custom_template", customTemplateInput.files[0]);
   }
+  data.set("add_custom_work_order", addCustomWorkOrder.checked ? "true" : "false");
+  if (addCustomWorkOrder.checked) {
+    data.set("custom_work_order_name", customWorkOrderNameInput.value.trim());
+  }
   return data;
 }
 
@@ -60,6 +68,39 @@ function validateSelection() {
   if (!useDefaultTemplate.checked && !customTemplateInput.files[0]) {
     throw new Error("Upload Custom Work Order Template (.zip) or use the default template.");
   }
+  if (addCustomWorkOrder.checked && !customWorkOrderNameInput.value.trim()) {
+    throw new Error("Enter a work order name.");
+  }
+}
+
+function resolveCustomWorkOrderFolder(prefix, rawName) {
+  const cleaned = (rawName || "").trim();
+  if (!cleaned) {
+    return "";
+  }
+  let body = cleaned;
+  if (body.toLowerCase().startsWith(prefix.toLowerCase())) {
+    body = body.slice(prefix.length).trim();
+  }
+  if (!body) {
+    return "";
+  }
+  return `${prefix}${body}`;
+}
+
+function updateCustomWorkOrderPreview() {
+  const show = addCustomWorkOrder.checked;
+  customWorkOrderField.hidden = !show;
+  customWorkOrderPreview.hidden = !show;
+  if (!show) {
+    customWorkOrderPreview.textContent = "Will create: —";
+    return;
+  }
+  const prefix = prefixInput.value.trim() || "RK-";
+  const resolved = resolveCustomWorkOrderFolder(prefix, customWorkOrderNameInput.value);
+  customWorkOrderPreview.textContent = resolved
+    ? `Will create: ${resolved}`
+    : "Will create: —";
 }
 
 function updateActionButton() {
@@ -75,7 +116,10 @@ function resetFormDefaults(defaultPrefix = "RK-") {
   dryRunBox.checked = true;
   prefixInput.value = defaultPrefix;
   customTemplateInput.value = "";
+  addCustomWorkOrder.checked = false;
+  customWorkOrderNameInput.value = "";
   toggleCustomTemplateField();
+  updateCustomWorkOrderPreview();
   updateActionButton();
 }
 
@@ -158,6 +202,9 @@ function fillSelect(select, values, placeholder) {
 }
 
 useDefaultTemplate.addEventListener("change", toggleCustomTemplateField);
+addCustomWorkOrder.addEventListener("change", updateCustomWorkOrderPreview);
+customWorkOrderNameInput.addEventListener("input", updateCustomWorkOrderPreview);
+prefixInput.addEventListener("input", updateCustomWorkOrderPreview);
 dryRunBox.addEventListener("change", updateActionButton);
 resetFormDefaults();
 window.addEventListener("pageshow", (event) => {

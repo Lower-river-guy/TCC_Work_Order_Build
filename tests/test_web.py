@@ -76,6 +76,10 @@ class WebTests(unittest.TestCase):
         self.assertIn("hidden", html)
         self.assertIn('id="dry-run" type="checkbox" checked', html)
         self.assertIn(f'app.js?v={APP_VERSION}', html)
+        self.assertIn('id="add-custom-work-order"', html)
+        self.assertNotIn('id="add-custom-work-order" type="checkbox" checked', html)
+        self.assertIn('id="custom-work-order-field"', html)
+        self.assertIn("Total Work Orders", html)
 
     def test_config_defaults(self):
         config = self.client.get("/api/config").get_json()
@@ -153,6 +157,27 @@ class WebTests(unittest.TestCase):
                 },
             )
         self.assertEqual(response.status_code, 400)
+
+    def test_custom_work_order_in_preview(self):
+        ftp = FakeFTP(_tree())
+        with patch("app.template_source.fetch_master_template_bytes", return_value=_master_zip()):
+            with patch("app.workflow.connect_ftp", return_value=ftp):
+                response = self.client.post(
+                    "/api/work-orders/preview",
+                    data={
+                        "prefix": "RK-",
+                        "device": "T48",
+                        "project": "Project A",
+                        "use_default_template": "true",
+                        "add_custom_work_order": "true",
+                        "custom_work_order_name": "Wall Drains",
+                    },
+                )
+        self.assertEqual(response.status_code, 200, response.get_data(as_text=True))
+        body = response.get_json()
+        names = [row["work_order"] for row in body["rows"]]
+        self.assertIn("RK-Wall Drains", names)
+        self.assertEqual(body["totals"]["total"], 2)
 
     def test_invalid_prefix_rejected(self):
         response = self.client.post(

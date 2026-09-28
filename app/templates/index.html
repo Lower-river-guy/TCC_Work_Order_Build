@@ -46,6 +46,17 @@
         <input id="prefix" type="text" value="{{ default_prefix }}" maxlength="50" autocomplete="off">
       </label>
 
+      <h3 class="subhead">Custom Work Order</h3>
+      <label class="check">
+        <input id="add-custom-work-order" type="checkbox" autocomplete="off">
+        Add Custom Work Order
+      </label>
+      <label id="custom-work-order-field" hidden>
+        Work Order Name
+        <input id="custom-work-order-name" type="text" maxlength="200" autocomplete="off" placeholder="Wall Drains">
+      </label>
+      <p id="custom-work-order-preview" class="note" hidden>Will create: —</p>
+
       <div class="split">
         <label>
           Device
@@ -76,7 +87,7 @@
       <p id="template-line" class="template-line">Template: —</p>
       <p id="banner" class="banner" hidden></p>
       <dl id="totals" class="summary">
-        <div><dt>Total Templates</dt><dd id="total-count">—</dd></div>
+        <div><dt>Total Work Orders</dt><dd id="total-count">—</dd></div>
         <div><dt>New</dt><dd id="new-count">—</dd></div>
         <div><dt>Existing / Skipped</dt><dd id="existing-count">—</dd></div>
       </dl>

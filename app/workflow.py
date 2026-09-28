@@ -15,6 +15,7 @@ from app.ftp_client import (
     upload_work_orders,
 )
 from app.ftp_guard import ReadOnlyFTP
+from app.custom_work_order import add_custom_work_order_to_staging
 from app.prefix import validate_prefix
 from app.settings import MASTER_TEMPLATE_SEARCH
 from app.template_source import TemplateSelection, load_template_zip_bytes, prepare_template_root
@@ -28,6 +29,8 @@ class OperationRequest:
     use_default_template: bool
     custom_bytes: bytes | None = None
     custom_filename: str | None = None
+    add_custom_work_order: bool = False
+    custom_work_order_name: str | None = None
 
 
 def build_staging(request: OperationRequest, work_root: Path) -> tuple[Path, list[str], str, TemplateSelection]:
@@ -40,7 +43,16 @@ def build_staging(request: OperationRequest, work_root: Path) -> tuple[Path, lis
     input_root = prepare_template_root(zip_bytes, work_root)
     built_zip, report = build_work_orders(input_root, MASTER_TEMPLATE_SEARCH, validated_prefix)
     staging = stage_work_orders(built_zip, work_root)
-    return staging, list(report.work_orders), validated_prefix, template
+    custom_folder = add_custom_work_order_to_staging(
+        staging,
+        validated_prefix,
+        enabled=request.add_custom_work_order,
+        raw_name=request.custom_work_order_name,
+    )
+    work_orders = list(report.work_orders)
+    if custom_folder and custom_folder not in work_orders:
+        work_orders.append(custom_folder)
+    return staging, work_orders, validated_prefix, template
 
 
 def preview_on_tcc(request: OperationRequest):
