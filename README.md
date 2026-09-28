@@ -1,23 +1,22 @@
 # TCC Work Order Builder
 
-Version 0.01.01
+Version 0.01.02
 
-Web application for TCC work-order uploads. The server loads the master template from Google Cloud Storage, applies the selected grade-checker prefix, compares the result against the project's `Work Orders` folder on TCC FTP, and uploads only new top-level work orders.
+Web application for TCC work-order uploads. The server loads the **default** master template from Google Cloud Storage or a **custom** ZIP uploaded for a single operation. Folder names in the template use `DK-`; the app replaces `DK-` with the **Work Order Prefix** you enter (default `RK-`).
 
-Master template:
+Master template (default):
 
 `gs://trimble-data-bucket-rk/tcc-work-order-builder/templates/Work Orders.zip`
 
-Users do not upload or download template ZIP files in the website.
+Custom ZIPs are processed under a unique temporary directory and are never written to GCS.
 
 ## Workflow
 
-1. Choose **Grade Checker** (Ryan Kolt → `RK-` from master `DK-` names).
-2. Choose **Device** and **Project** on TCC FTP.
-3. Leave **Dry Run** checked to preview with no FTP writes, or uncheck it to upload after confirmation.
-4. Run **Preview** or **Run Dry Run** / **Upload New Work Orders**.
-
-Dry run defaults to on for every page load and is not stored in browser storage.
+1. **Template** — keep **Use Default Work Order Template** checked, or upload a custom `.zip`.
+2. **Work Order Prefix** — default `RK-` (examples: `MH-`, `KL-`, `JS-`).
+3. **Device** and **Project** on TCC FTP.
+4. **Dry Run** (default on) — preview with no FTP writes.
+5. **Preview** / **Run Dry Run** / **Upload New Work Orders** (with confirmation when not dry run).
 
 ## Local run
 
@@ -31,11 +30,7 @@ python -m app.main
 
 | Name | Purpose |
 | --- | --- |
-| `APP_ACCESS_TOKEN` | Optional access token for pages and API routes except `/health` and `/api/config`. |
 | `TCC_T48_DEVICE_USER` / `TCC_T48_DEVICE_PASS` | T48 FTP login (Secret Manager on Cloud Run). |
-| `GCS_TEMPLATE_BUCKET` | Default `trimble-data-bucket-rk`. |
-| `GCS_TEMPLATE_OBJECT` | Default `tcc-work-order-builder/templates/Work Orders.zip`. |
-| `TCC_FTP_HOST`, `TCC_FTP_PORT`, `TCC_FTP_TIMEOUT` | FTP connection settings. |
-| `TCC_DEVICE_ENV_FILE` | Optional local env file when T48 variables are unset. |
-
-Cloud Run deployment requires permission to read the master template object. Production deploy is separate from this repository revision.
+| `GCS_TEMPLATE_BUCKET` / `GCS_TEMPLATE_OBJECT` | Default master template location. |
+| `MAX_UPLOAD_MB` | Custom template upload limit (default `200`). |
+| `APP_ACCESS_TOKEN` | Optional access control. |

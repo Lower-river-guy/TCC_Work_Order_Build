@@ -4,8 +4,10 @@ from __future__ import annotations
 
 import os
 
-APP_VERSION = "0.01.01"
+APP_VERSION = "0.01.02"
 APP_NAME = "TCC Work Order Builder"
+
+DEFAULT_PREFIX = "RK-"
 
 ZIP_FILE_NAME = "Work Orders.zip"
 STAGING_FOLDER_NAME = "Work Orders"
@@ -29,3 +31,12 @@ MAX_UPLOAD_FILES = 10_000
 MAX_UNCOMPRESSED_BYTES = 1024 * 1024 * 1024
 
 DRY_RUN_BANNER = "DRY RUN — NO TCC CHANGES MADE"
+
+
+def max_upload_bytes() -> int:
+    raw = os.environ.get("MAX_UPLOAD_MB", "200").strip() or "200"
+    try:
+        megabytes = int(raw)
+    except ValueError:
+        megabytes = 200
+    return max(1, megabytes) * 1024 * 1024

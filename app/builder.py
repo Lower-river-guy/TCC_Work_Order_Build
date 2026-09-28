@@ -164,6 +164,19 @@ def extract_template_zip(zip_bytes: bytes, dest: Path) -> Path:
     return dest
 
 
+def validate_work_order_template_root(input_root: Path) -> None:
+    """Require at least one top-level work-order folder after extraction."""
+    if not input_root.exists() or not input_root.is_dir():
+        raise ValueError("Invalid work order template structure.")
+    folders = [
+        path
+        for path in input_root.iterdir()
+        if path.is_dir() and path.name not in {"__MACOSX", ".DS_Store"}
+    ]
+    if not folders:
+        raise ValueError("Invalid work order template: no work-order folders were found.")
+
+
 def build_work_orders(input_root: Path, search: str, replacement: str) -> tuple[bytes, BuildReport]:
     """Create the work-order ZIP described by REV09."""
     report = BuildReport()

@@ -9,8 +9,6 @@ import zipfile
 from dataclasses import dataclass, field
 from ftplib import FTP, error_perm
 from pathlib import Path
-from typing import TYPE_CHECKING
-
 from app.settings import (
     DEFAULT_FTP_HOST,
     DEFAULT_FTP_PORT,
@@ -21,10 +19,6 @@ from app.settings import (
     REMOTE_WORK_ORDERS_FOLDER,
     STAGING_FOLDER_NAME,
 )
-
-if TYPE_CHECKING:
-    from app.grade_checkers import GradeChecker
-
 
 @dataclass
 class WorkOrderRow:
@@ -43,7 +37,7 @@ class WorkOrderRow:
 @dataclass
 class UploadReport:
     dry_run: bool
-    grade_checker: str
+    template: str
     prefix: str
     device: str
     project: str
@@ -59,7 +53,7 @@ class UploadReport:
     def as_dict(self) -> dict[str, object]:
         return {
             "dry_run": self.dry_run,
-            "grade_checker": self.grade_checker,
+            "template": self.template,
             "prefix": self.prefix,
             "device": self.device,
             "project": self.project,
@@ -274,7 +268,7 @@ def _plan_rows(staging: Path, remote_names: set[str], dry_run: bool) -> tuple[li
         if not item.is_dir():
             continue
         if item.name.lower() in remote_names:
-            rows.append(WorkOrderRow(item.name, "Exists", "Skip"))
+            rows.append(WorkOrderRow(item.name, "Existing", "Skip"))
             existing_count += 1
         else:
             action = "Would Upload" if dry_run else "Upload"
@@ -294,7 +288,8 @@ def compare_work_orders(
     device_name: str,
     project_name: str,
     target: str,
-    checker: GradeChecker,
+    prefix: str,
+    template_label: str,
     inside_work_orders: bool,
 ) -> UploadReport:
     remote_names: set[str] = set()
@@ -313,16 +308,16 @@ def compare_work_orders(
 
     log = [
         DRY_RUN_BANNER,
-        f"[GRADE CHECKER] {checker.label}",
-        f"[PREFIX] {checker.prefix}",
+        f"[TEMPLATE] {template_label}",
+        f"[PREFIX] {prefix}",
         f"[DEVICE] {device_name}",
         f"[PROJECT] {project_name}",
         f"[TARGET] {target}",
     ]
     return UploadReport(
         dry_run=True,
-        grade_checker=checker.label,
-        prefix=checker.prefix,
+        template=template_label,
+        prefix=prefix,
         device=device_name,
         project=project_name,
         target=target,
@@ -379,13 +374,13 @@ def upload_tree(ftp, local_root: Path, log: list[str]) -> tuple[int, int, int, l
         remote_dirs = {name.lower(): name for name in ftp_list_directories(ftp)}
         if item.name.lower() in remote_dirs:
             skipped_work_orders += 1
-            rows.append(WorkOrderRow(item.name, "Exists", "Skip"))
+            rows.append(WorkOrderRow(item.name, "Existing", "Skip"))
             log.append(f"[SKIP EXISTING WORK ORDER] {item.name}")
             continue
         remote_dirs = {name.lower(): name for name in ftp_list_directories(ftp)}
         if item.name.lower() in remote_dirs:
             skipped_work_orders += 1
-            rows.append(WorkOrderRow(item.name, "Exists", "Skip — Already Exists"))
+            rows.append(WorkOrderRow(item.name, "Existing", "Skip — Already Exists"))
             log.append(f"[SKIP — ALREADY EXISTS] {item.name}")
             continue
         ftp.mkd(item.name)
@@ -414,23 +409,24 @@ def stage_work_orders(zip_bytes: bytes, output_root: Path) -> Path:
 def upload_work_orders(
     ftp,
     staging: Path,
-    checker: GradeChecker,
+    prefix: str,
+    template_label: str,
     device_name: str,
     project_name: str,
 ) -> UploadReport:
     """Upload new work orders. FTP must already be inside the project's Work Orders folder."""
     uploaded, directories, skipped, rows = upload_tree(ftp, staging, log := [])
-    log.insert(0, f"[PREFIX] {checker.prefix}")
-    log.insert(0, f"[GRADE CHECKER] {checker.label}")
+    log.insert(0, f"[PREFIX] {prefix}")
+    log.insert(0, f"[TEMPLATE] {template_label}")
     totals = {
         "total": len(rows),
         "new": sum(1 for row in rows if row.status == "New"),
-        "existing": sum(1 for row in rows if row.status == "Exists"),
+        "existing": sum(1 for row in rows if row.status == "Existing"),
     }
     return UploadReport(
         dry_run=False,
-        grade_checker=checker.label,
-        prefix=checker.prefix,
+        template=template_label,
+        prefix=prefix,
         device=device_name,
         project=project_name,
         target=ftp.pwd(),

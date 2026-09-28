@@ -181,6 +181,17 @@ dialog form {
   white-space: pre-wrap;
 }
 
+.subhead {
+  margin: 1rem 0 0.35rem;
+  font-size: 0.95rem;
+  font-weight: 650;
+}
+
+.template-line {
+  margin: 0 0 0.75rem;
+  font-weight: 600;
+}
+
 @media (max-width: 720px) {
   .split, .summary { grid-template-columns: 1fr 1fr; }
   .mast { grid-template-columns: 1fr; }

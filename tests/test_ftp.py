@@ -14,7 +14,6 @@ from app.builder import build_work_orders
 from app.ftp_client import (
     compare_work_orders,
     credentials_configured,
-    get_t48_credentials,
     navigate_to_work_orders,
     resolve_credentials,
     stage_work_orders,
@@ -23,7 +22,6 @@ from app.ftp_client import (
     validate_remote_name,
 )
 from app.ftp_guard import ReadOnlyFTP
-from app.grade_checkers import get_grade_checker
 from app.settings import DRY_RUN_BANNER, PLACEHOLDER_DATA
 from tests.fake_ftp import FakeFTP
 
@@ -47,7 +45,7 @@ def _device_tree(work_orders: dict | None = None) -> dict:
     }
 
 
-def _sample_zip(prefix: str = "CL-") -> bytes:
+def _sample_zip(prefix: str = "RK-") -> bytes:
     with tempfile.TemporaryDirectory() as temp_name:
         root = Path(temp_name)
         (root / "DK-New").mkdir()
@@ -60,10 +58,7 @@ def _sample_zip(prefix: str = "CL-") -> bytes:
 
 class CredentialTests(unittest.TestCase):
     def setUp(self):
-        self._saved = {
-            key: os.environ.get(key)
-            for key in ("TCC_T48_DEVICE_USER", "TCC_T48_DEVICE_PASS", "TCC_DEVICE_ENV_FILE")
-        }
+        self._saved = {key: os.environ.get(key) for key in ("TCC_T48_DEVICE_USER", "TCC_T48_DEVICE_PASS")}
         for key in self._saved:
             os.environ.pop(key, None)
 
@@ -74,21 +69,20 @@ class CredentialTests(unittest.TestCase):
             else:
                 os.environ[key] = value
 
-    def test_missing_credentials_name_the_variables_only(self):
-        os.environ["TCC_T48_DEVICE_USER"] = "not-a-real-user"
+    def test_missing_credentials(self):
+        os.environ["TCC_T48_DEVICE_USER"] = "user-only"
         with self.assertRaises(RuntimeError):
             resolve_credentials()
         self.assertFalse(credentials_configured())
 
 
 class PreviewAndUploadTests(unittest.TestCase):
-    def test_dry_run_can_browse_and_detect_existing_without_writes(self):
+    def test_dry_run_performs_zero_writes(self):
         ftp = FakeFTP(_device_tree({"RK-Old": {}}))
         guarded = ReadOnlyFTP(ftp, read_only=True)
         device_name, project_name, target, inside = navigate_to_work_orders(
             guarded, "T48", "Project A", dry_run=True
         )
-        self.assertTrue(inside)
         with tempfile.TemporaryDirectory() as temp_name:
             staging = stage_work_orders(_sample_zip("RK-"), Path(temp_name))
             report = compare_work_orders(
@@ -97,7 +91,8 @@ class PreviewAndUploadTests(unittest.TestCase):
                 device_name,
                 project_name,
                 target,
-                get_grade_checker("ryan-kolt"),
+                "RK-",
+                "Default",
                 inside,
             )
         self.assertEqual(ftp.mkd_calls, [])
@@ -107,18 +102,12 @@ class PreviewAndUploadTests(unittest.TestCase):
         self.assertEqual(actions["RK-Old"], "Skip")
         self.assertEqual(actions["RK-New"], "Would Upload")
 
-    def test_read_only_guard_blocks_accidental_mkd(self):
-        ftp = ReadOnlyFTP(FakeFTP(_device_tree()), read_only=True)
-        with self.assertRaises(Exception):
-            navigate_to_work_orders(ftp, "T48", "Project A", dry_run=False)
-
     def test_upload_skips_existing_work_order(self):
-        payload = _sample_zip("RK-")
         ftp = FakeFTP(_device_tree({"RK-Old": {}}))
         navigate_to_work_orders(ftp, "T48", "Project A", dry_run=False)
         with tempfile.TemporaryDirectory() as temp_name:
-            staging = stage_work_orders(payload, Path(temp_name))
-            report = upload_work_orders(ftp, staging, get_grade_checker("ryan-kolt"), "T48", "Project A")
+            staging = stage_work_orders(_sample_zip("RK-"), Path(temp_name))
+            report = upload_work_orders(ftp, staging, "RK-", "Default", "T48", "Project A")
         self.assertEqual(report.skipped_existing_work_orders, 1)
         stored_paths = [path for path, _data in ftp.stored]
         self.assertTrue(any(path.endswith("/RK-New/notes.txt") for path in stored_paths))

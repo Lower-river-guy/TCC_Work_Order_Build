@@ -11,7 +11,7 @@
     <p class="brand"><span>&gt;&lt;(((º&gt;</span><span>&gt;&lt;(((º&gt;</span><strong>RK</strong><span>&gt;&lt;(((º&gt;</span></p>
     <div>
       <h1>{{ app_name }}</h1>
-      <p class="lede">Compare the server master template against TCC, then upload only new work orders.</p>
+      <p class="lede">Build work orders from the default or a custom template, then upload only new folders to TCC.</p>
     </div>
     <p class="version">v{{ version }}</p>
   </header>
@@ -30,16 +30,22 @@
     <section class="panel">
       <h2>1. Selection</h2>
       <p id="ftp-status" class="note">Checking server…</p>
-      <div class="split">
-        <label>
-          Grade Checker
-          <select id="grade-checker" required></select>
-        </label>
-        <label>
-          Prefix
-          <input id="prefix-display" type="text" readonly value="—">
-        </label>
-      </div>
+
+      <h3 class="subhead">Template</h3>
+      <label class="check">
+        <input id="use-default-template" type="checkbox" checked>
+        Use Default Work Order Template
+      </label>
+      <label id="custom-template-field" hidden>
+        Upload Custom Work Order Template (.zip)
+        <input id="custom-template" name="custom_template" type="file" accept=".zip,application/zip">
+      </label>
+
+      <label>
+        Work Order Prefix
+        <input id="prefix" type="text" value="{{ default_prefix }}" maxlength="50" autocomplete="off">
+      </label>
+
       <div class="split">
         <label>
           Device
@@ -54,6 +60,7 @@
         <button id="load-devices" type="button">Load devices</button>
         <button id="load-projects" type="button">Load projects</button>
       </div>
+
       <label class="check dry-run-check">
         <input id="dry-run" type="checkbox" checked>
         Dry Run — Preview only, make no changes to TCC
@@ -66,6 +73,7 @@
 
     <section class="panel">
       <h2>2. Preview</h2>
+      <p id="template-line" class="template-line">Template: —</p>
       <p id="banner" class="banner" hidden></p>
       <dl id="totals" class="summary">
         <div><dt>Total Templates</dt><dd id="total-count">—</dd></div>
@@ -82,7 +90,7 @@
             </tr>
           </thead>
           <tbody id="preview-body">
-            <tr><td colspan="3" class="empty">Select grade checker, device, and project, then run Preview.</td></tr>
+            <tr><td colspan="3" class="empty">Choose template, prefix, device, and project, then run Preview.</td></tr>
           </tbody>
         </table>
       </div>
@@ -93,9 +101,9 @@
   <dialog id="confirm-dialog">
     <form method="dialog" id="confirm-form">
       <h2>Confirm Upload</h2>
-      <p class="note">Review the selections below. Only new work orders will be uploaded. Existing folders are never changed.</p>
+      <p class="note">Only new work orders will be uploaded. Existing folders are never changed.</p>
       <dl class="confirm-list">
-        <div><dt>Grade Checker</dt><dd id="confirm-grade"></dd></div>
+        <div><dt>Template</dt><dd id="confirm-template"></dd></div>
         <div><dt>Prefix</dt><dd id="confirm-prefix"></dd></div>
         <div><dt>Device</dt><dd id="confirm-device"></dd></div>
         <div><dt>Project</dt><dd id="confirm-project"></dd></div>

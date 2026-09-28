@@ -2,13 +2,16 @@ const tokenInput = document.querySelector("#access-token");
 const accessPanel = document.querySelector("#access-panel");
 const accessNote = document.querySelector("#access-note");
 const ftpStatus = document.querySelector("#ftp-status");
-const gradeChecker = document.querySelector("#grade-checker");
-const prefixDisplay = document.querySelector("#prefix-display");
+const useDefaultTemplate = document.querySelector("#use-default-template");
+const customTemplateField = document.querySelector("#custom-template-field");
+const customTemplateInput = document.querySelector("#custom-template");
+const prefixInput = document.querySelector("#prefix");
 const deviceSelect = document.querySelector("#device");
 const projectSelect = document.querySelector("#project");
 const dryRunBox = document.querySelector("#dry-run");
 const previewButton = document.querySelector("#preview-button");
 const actionButton = document.querySelector("#action-button");
+const templateLine = document.querySelector("#template-line");
 const banner = document.querySelector("#banner");
 const previewBody = document.querySelector("#preview-body");
 const log = document.querySelector("#log");
@@ -21,9 +24,9 @@ function token() {
   return sessionStorage.getItem(TOKEN_KEY) || "";
 }
 
-function headers(extra = {}) {
+function authHeaders() {
   const value = token();
-  return value ? { ...extra, "X-Access-Token": value, "Content-Type": "application/json" } : { ...extra, "Content-Type": "application/json" };
+  return value ? { "X-Access-Token": value } : {};
 }
 
 async function readJson(response) {
@@ -34,21 +37,28 @@ async function readJson(response) {
   return data;
 }
 
-function selectionPayload() {
-  return {
-    grade_checker_id: gradeChecker.value,
-    device: deviceSelect.value,
-    project: projectSelect.value,
-    access_token: token() || undefined,
-  };
+function buildFormData(extra = {}) {
+  const data = new FormData();
+  data.set("prefix", prefixInput.value.trim());
+  data.set("device", deviceSelect.value);
+  data.set("project", projectSelect.value);
+  data.set("use_default_template", useDefaultTemplate.checked ? "true" : "false");
+  if (token()) {
+    data.set("access_token", token());
+  }
+  Object.entries(extra).forEach(([key, value]) => data.set(key, value));
+  if (!useDefaultTemplate.checked && customTemplateInput.files[0]) {
+    data.set("custom_template", customTemplateInput.files[0]);
+  }
+  return data;
 }
 
 function validateSelection() {
-  if (!gradeChecker.value) {
-    throw new Error("Select a grade checker.");
-  }
   if (!deviceSelect.value || !projectSelect.value) {
     throw new Error("Select a device and a project.");
+  }
+  if (!useDefaultTemplate.checked && !customTemplateInput.files[0]) {
+    throw new Error("Upload Custom Work Order Template (.zip) or use the default template.");
   }
 }
 
@@ -56,8 +66,13 @@ function updateActionButton() {
   actionButton.textContent = dryRunBox.checked ? "Run Dry Run" : "Upload New Work Orders";
 }
 
+function toggleCustomTemplateField() {
+  customTemplateField.hidden = useDefaultTemplate.checked;
+}
+
 function renderPreview(data) {
   lastPreview = data;
+  templateLine.textContent = `Template: ${data.template || "—"}`;
   banner.hidden = !data.banner;
   banner.textContent = data.banner || "";
   document.querySelector("#total-count").textContent = data.totals?.total ?? "—";
@@ -65,7 +80,7 @@ function renderPreview(data) {
   document.querySelector("#existing-count").textContent = data.totals?.existing ?? "—";
   previewBody.innerHTML = "";
   if (!data.rows?.length) {
-    previewBody.innerHTML = '<tr><td colspan="3" class="empty">No work orders found in the master template.</td></tr>';
+    previewBody.innerHTML = '<tr><td colspan="3" class="empty">No work orders found in the template.</td></tr>';
   } else {
     data.rows.forEach((row) => {
       const tr = document.createElement("tr");
@@ -80,16 +95,14 @@ async function callPreview() {
   validateSelection();
   previewButton.disabled = true;
   actionButton.disabled = true;
-  log.textContent = "Building preview from master template…";
+  log.textContent = "Building preview…";
   try {
-    const data = await readJson(
-      await fetch("/api/work-orders/preview", {
-        method: "POST",
-        headers: headers(),
-        body: JSON.stringify(selectionPayload()),
-      })
-    );
-    renderPreview(data);
+    const response = await fetch("/api/work-orders/preview", {
+      method: "POST",
+      headers: authHeaders(),
+      body: buildFormData(),
+    });
+    renderPreview(await readJson(response));
   } catch (error) {
     log.textContent = error.message;
   } finally {
@@ -104,19 +117,15 @@ async function callRun(dryRun, confirmUpload) {
   actionButton.disabled = true;
   log.textContent = dryRun ? "Running dry run…" : "Uploading new work orders…";
   try {
-    const payload = {
-      ...selectionPayload(),
-      dry_run: dryRun,
-      confirm_upload: confirmUpload,
-    };
-    const data = await readJson(
-      await fetch("/api/work-orders/run", {
-        method: "POST",
-        headers: headers(),
-        body: JSON.stringify(payload),
-      })
-    );
-    renderPreview(data);
+    const response = await fetch("/api/work-orders/run", {
+      method: "POST",
+      headers: authHeaders(),
+      body: buildFormData({
+        dry_run: dryRun ? "true" : "false",
+        confirm_upload: confirmUpload ? "true" : "false",
+      }),
+    });
+    renderPreview(await readJson(response));
   } catch (error) {
     log.textContent = error.message;
   } finally {
@@ -133,28 +142,23 @@ function fillSelect(select, values, placeholder) {
   select.appendChild(first);
   values.forEach((value) => {
     const option = document.createElement("option");
-    option.value = value.id || value;
-    option.textContent = value.label || value;
-    if (value.prefix) {
-      option.dataset.prefix = value.prefix;
-    }
+    option.value = value;
+    option.textContent = value;
     select.appendChild(option);
   });
 }
 
-gradeChecker.addEventListener("change", () => {
-  const option = gradeChecker.selectedOptions[0];
-  prefixDisplay.value = option?.dataset.prefix || "—";
-});
-
+useDefaultTemplate.addEventListener("change", toggleCustomTemplateField);
 dryRunBox.addEventListener("change", updateActionButton);
+useDefaultTemplate.checked = true;
 dryRunBox.checked = true;
+toggleCustomTemplateField();
 updateActionButton();
 
 document.querySelector("#load-devices").addEventListener("click", async () => {
   ftpStatus.textContent = "Loading devices…";
   try {
-    const data = await readJson(await fetch("/api/ftp/devices", { headers: headers() }));
+    const data = await readJson(await fetch("/api/ftp/devices", { headers: authHeaders() }));
     fillSelect(deviceSelect, data.devices, "Select a device");
     ftpStatus.textContent = `${data.devices.length} devices found.`;
   } catch (error) {
@@ -170,7 +174,9 @@ document.querySelector("#load-projects").addEventListener("click", async () => {
   ftpStatus.textContent = "Loading projects…";
   try {
     const data = await readJson(
-      await fetch(`/api/ftp/projects?device=${encodeURIComponent(deviceSelect.value)}`, { headers: headers() })
+      await fetch(`/api/ftp/projects?device=${encodeURIComponent(deviceSelect.value)}`, {
+        headers: authHeaders(),
+      })
     );
     fillSelect(projectSelect, data.projects, "Select a project");
     ftpStatus.textContent = `${data.projects.length} projects found for ${data.device}.`;
@@ -179,9 +185,7 @@ document.querySelector("#load-projects").addEventListener("click", async () => {
   }
 });
 
-previewButton.addEventListener("click", () => {
-  callPreview();
-});
+previewButton.addEventListener("click", () => callPreview());
 
 actionButton.addEventListener("click", () => {
   if (dryRunBox.checked) {
@@ -192,7 +196,7 @@ actionButton.addEventListener("click", () => {
     log.textContent = "Run Preview first.";
     return;
   }
-  document.querySelector("#confirm-grade").textContent = lastPreview.grade_checker;
+  document.querySelector("#confirm-template").textContent = lastPreview.template;
   document.querySelector("#confirm-prefix").textContent = lastPreview.prefix;
   document.querySelector("#confirm-device").textContent = deviceSelect.value;
   document.querySelector("#confirm-project").textContent = projectSelect.value;
@@ -201,9 +205,7 @@ actionButton.addEventListener("click", () => {
   confirmDialog.showModal();
 });
 
-document.querySelector("#cancel-upload").addEventListener("click", () => {
-  confirmDialog.close();
-});
+document.querySelector("#cancel-upload").addEventListener("click", () => confirmDialog.close());
 
 document.querySelector("#confirm-form").addEventListener("submit", (event) => {
   event.preventDefault();
@@ -224,12 +226,10 @@ async function loadConfig() {
   try {
     const data = await readJson(await fetch("/api/config"));
     accessPanel.hidden = !data.access_required;
-    fillSelect(gradeChecker, data.grade_checkers, "Select a grade checker");
-    if (data.grade_checkers.length === 1) {
-      gradeChecker.value = data.grade_checkers[0].id;
-      prefixDisplay.value = data.grade_checkers[0].prefix;
-    }
+    prefixInput.value = data.default_prefix || "RK-";
+    useDefaultTemplate.checked = true;
     dryRunBox.checked = true;
+    toggleCustomTemplateField();
     updateActionButton();
     ftpStatus.textContent = data.ftp_configured
       ? "FTP credentials are configured. Load devices to begin."

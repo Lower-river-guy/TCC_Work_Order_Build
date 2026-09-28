@@ -8,12 +8,13 @@ import os
 from flask import Flask, jsonify, render_template, request
 
 from app import ftp_client, workflow
-from app.grade_checkers import grade_checkers_for_api
-from app.settings import APP_NAME, APP_VERSION
+from app.settings import APP_NAME, APP_VERSION, DEFAULT_PREFIX, max_upload_bytes
+from app.workflow import OperationRequest
 
 
 def create_app() -> Flask:
     app = Flask(__name__)
+    app.config["MAX_CONTENT_LENGTH"] = max_upload_bytes()
 
     @app.before_request
     def require_access_token():
@@ -38,6 +39,7 @@ def create_app() -> Flask:
             "index.html",
             app_name=APP_NAME,
             version=APP_VERSION,
+            default_prefix=DEFAULT_PREFIX,
         )
 
     @app.get("/health")
@@ -50,7 +52,8 @@ def create_app() -> Flask:
             version=APP_VERSION,
             access_required=bool(os.environ.get("APP_ACCESS_TOKEN", "").strip()),
             ftp_configured=ftp_client.credentials_configured(),
-            grade_checkers=grade_checkers_for_api(),
+            default_prefix=DEFAULT_PREFIX,
+            default_template=True,
             dry_run_default=True,
         )
 
@@ -87,10 +90,9 @@ def create_app() -> Flask:
 
     @app.post("/api/work-orders/preview")
     def work_orders_preview():
-        payload = _json_or_form()
         try:
-            grade_checker_id, device, project = _require_selection(payload)
-            report = workflow.preview_on_tcc(grade_checker_id, device, project)
+            operation = _parse_operation_request()
+            report = workflow.preview_on_tcc(operation)
         except ValueError as error:
             return jsonify(error=str(error)), 400
         except FileNotFoundError as error:
@@ -103,15 +105,13 @@ def create_app() -> Flask:
 
     @app.post("/api/work-orders/run")
     def work_orders_run():
-        payload = _json_or_form()
+        payload = _raw_payload()
         dry_run = _parse_dry_run(payload.get("dry_run", "true"))
         confirm_upload = _parse_bool(payload.get("confirm_upload", "false"))
         try:
-            grade_checker_id, device, project = _require_selection(payload)
+            operation = _parse_operation_request()
             report = workflow.run_on_tcc(
-                grade_checker_id,
-                device,
-                project,
+                operation,
                 dry_run=dry_run,
                 confirm_upload=confirm_upload,
             )
@@ -125,24 +125,42 @@ def create_app() -> Flask:
             return jsonify(error=_public_error(error)), 502
         return jsonify(report.as_dict())
 
+    @app.errorhandler(413)
+    def too_large(_error):
+        return jsonify(error="Upload exceeds the configured size limit."), 413
+
     return app
 
 
-def _json_or_form() -> dict:
+def _raw_payload() -> dict:
     if request.is_json:
         return dict(request.get_json(silent=True) or {})
     return dict(request.form)
 
 
-def _require_selection(payload: dict) -> tuple[str, str, str]:
-    grade_checker_id = (payload.get("grade_checker_id") or "").strip()
+def _parse_operation_request() -> OperationRequest:
+    payload = _raw_payload()
     device = (payload.get("device") or "").strip()
     project = (payload.get("project") or "").strip()
-    if not grade_checker_id:
-        raise ValueError("Select a grade checker.")
     if not device or not project:
         raise ValueError("Select a device and a project.")
-    return grade_checker_id, device, project
+    use_default = _parse_bool(payload.get("use_default_template", "true"))
+    custom_bytes = None
+    custom_filename = None
+    if not use_default:
+        upload = request.files.get("custom_template")
+        if upload is None or not upload.filename:
+            raise ValueError("Upload Custom Work Order Template (.zip) or use the default template.")
+        custom_filename = upload.filename
+        custom_bytes = upload.read()
+    return OperationRequest(
+        prefix=(payload.get("prefix") or DEFAULT_PREFIX).strip(),
+        device=device,
+        project=project,
+        use_default_template=use_default,
+        custom_bytes=custom_bytes,
+        custom_filename=custom_filename,
+    )
 
 
 def _parse_dry_run(raw: object) -> bool:
