@@ -1,4 +1,4 @@
-"""Load default (GCS) or custom (request-only) work order template ZIPs."""
+"""Load default (GCS), uploaded, or no template for a work-order operation."""
 
 from __future__ import annotations
 
@@ -11,6 +11,10 @@ from app.builder import extract_template_zip, validate_work_order_template_root
 from app.gcs_template import fetch_master_template_bytes
 from app.settings import max_upload_bytes
 
+TEMPLATE_SOURCE_DEFAULT = "default"
+TEMPLATE_SOURCE_UPLOAD = "upload"
+TEMPLATE_SOURCE_NONE = "none"
+
 
 @dataclass(frozen=True)
 class TemplateSelection:
@@ -19,24 +23,45 @@ class TemplateSelection:
     filename: str | None = None
 
 
-def load_template_zip_bytes(
-    *,
-    use_default: bool,
+def normalize_template_source(raw: object) -> str:
+    value = str(raw or "").strip().lower()
+    if value in {TEMPLATE_SOURCE_DEFAULT, "true", "default_template"}:
+        return TEMPLATE_SOURCE_DEFAULT
+    if value in {TEMPLATE_SOURCE_UPLOAD, "upload", "custom", "custom_zip"}:
+        return TEMPLATE_SOURCE_UPLOAD
+    if value in {TEMPLATE_SOURCE_NONE, "none", "no_template", "custom_only"}:
+        return TEMPLATE_SOURCE_NONE
+    if value in {"false", "0"}:
+        return TEMPLATE_SOURCE_UPLOAD
+    raise ValueError("Select a template source: Default Template, Upload Custom ZIP, or No Template.")
+
+
+def resolve_template_selection(
+    source: str,
     custom_bytes: bytes | None,
     custom_filename: str | None,
-) -> tuple[bytes, TemplateSelection]:
-    if use_default:
+) -> tuple[bytes | None, TemplateSelection]:
+    if source == TEMPLATE_SOURCE_DEFAULT:
         return fetch_master_template_bytes(), TemplateSelection(label="Default", kind="default")
 
-    if custom_bytes is None or not custom_filename:
-        raise ValueError("Upload Custom Work Order Template (.zip) or use the default template.")
-    validate_custom_template_bytes(custom_bytes, custom_filename)
-    safe_name = Path(custom_filename).name
-    return custom_bytes, TemplateSelection(
-        label=f"Custom — {safe_name}",
-        kind="custom",
-        filename=safe_name,
-    )
+    if source == TEMPLATE_SOURCE_UPLOAD:
+        if custom_bytes is None or not custom_filename:
+            raise ValueError("Upload Custom Work Order Template (.zip).")
+        validate_custom_template_bytes(custom_bytes, custom_filename)
+        safe_name = Path(custom_filename).name
+        return custom_bytes, TemplateSelection(
+            label=f"Uploaded — {safe_name}",
+            kind="upload",
+            filename=safe_name,
+        )
+
+    if source == TEMPLATE_SOURCE_NONE:
+        return None, TemplateSelection(
+            label="No Template — Custom Work Orders Only",
+            kind="none",
+        )
+
+    raise ValueError("Select a template source: Default Template, Upload Custom ZIP, or No Template.")
 
 
 def validate_custom_template_bytes(zip_bytes: bytes, filename: str | None) -> None:

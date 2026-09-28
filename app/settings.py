@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import os
 
-APP_VERSION = "0.01.04"
+APP_VERSION = "0.01.05"
 APP_NAME = "TCC Work Order Builder"
 
 DEFAULT_PREFIX = "RK-"

@@ -5,7 +5,13 @@ import zipfile
 from pathlib import Path
 from unittest.mock import patch
 
-from app.template_source import load_template_zip_bytes, prepare_template_root, validate_custom_template_bytes
+from app.template_source import (
+    TEMPLATE_SOURCE_NONE,
+    TEMPLATE_SOURCE_UPLOAD,
+    prepare_template_root,
+    resolve_template_selection,
+    validate_custom_template_bytes,
+)
 from app.workflow import OperationRequest, build_staging
 
 
@@ -19,7 +25,7 @@ def _zip_with_folder(folder: str) -> bytes:
 class TemplateSourceTests(unittest.TestCase):
     @patch("app.template_source.fetch_master_template_bytes", return_value=_zip_with_folder("DK-Job"))
     def test_default_template_from_gcs(self, mock_fetch):
-        payload, selection = load_template_zip_bytes(use_default=True, custom_bytes=None, custom_filename=None)
+        payload, selection = resolve_template_selection("default", None, None)
         self.assertEqual(selection.label, "Default")
         self.assertTrue(payload)
         mock_fetch.assert_called_once()
@@ -27,14 +33,15 @@ class TemplateSourceTests(unittest.TestCase):
     def test_custom_template_does_not_call_gcs(self):
         custom = _zip_with_folder("DK-Custom")
         with patch("app.template_source.fetch_master_template_bytes") as mock_fetch:
-            payload, selection = load_template_zip_bytes(
-                use_default=False,
-                custom_bytes=custom,
-                custom_filename="mine.zip",
-            )
+            payload, selection = resolve_template_selection("upload", custom, "mine.zip")
         mock_fetch.assert_not_called()
-        self.assertEqual(selection.label, "Custom — mine.zip")
+        self.assertEqual(selection.label, "Uploaded — mine.zip")
         self.assertEqual(payload, custom)
+
+    def test_no_template_mode(self):
+        payload, selection = resolve_template_selection("none", None, None)
+        self.assertIsNone(payload)
+        self.assertEqual(selection.kind, TEMPLATE_SOURCE_NONE)
 
     def test_corrupt_zip_rejected(self):
         with self.assertRaises(ValueError):
@@ -63,14 +70,14 @@ class TemplateSourceTests(unittest.TestCase):
             prefix="MH-",
             device="T48",
             project="Project A",
-            use_default_template=False,
+            template_source=TEMPLATE_SOURCE_UPLOAD,
             custom_bytes=custom,
             custom_filename="custom.zip",
         )
         with tempfile.TemporaryDirectory(prefix="tcc-test-") as temp_name:
-            staging, names, prefix, template = build_staging(request, Path(temp_name))
+            staging, names, prefix, template, _sources = build_staging(request, Path(temp_name))
             self.assertEqual(prefix, "MH-")
-            self.assertEqual(template.label, "Custom — custom.zip")
+            self.assertEqual(template.label, "Uploaded — custom.zip")
             self.assertEqual(names, ["MH-Two"])
             self.assertTrue(staging.exists())
 

@@ -2,13 +2,11 @@ const tokenInput = document.querySelector("#access-token");
 const accessPanel = document.querySelector("#access-panel");
 const accessNote = document.querySelector("#access-note");
 const ftpStatus = document.querySelector("#ftp-status");
-const useDefaultTemplate = document.querySelector("#use-default-template");
+const templateSourceInputs = document.querySelectorAll('input[name="template_source"]');
 const customTemplateField = document.querySelector("#custom-template-field");
 const customTemplateInput = document.querySelector("#custom-template");
 const prefixInput = document.querySelector("#prefix");
-const addCustomWorkOrder = document.querySelector("#add-custom-work-order");
-const customWorkOrderField = document.querySelector("#custom-work-order-field");
-const customWorkOrderNameInput = document.querySelector("#custom-work-order-name");
+const customWorkOrderNamesInput = document.querySelector("#custom-work-order-names");
 const customWorkOrderPreview = document.querySelector("#custom-work-order-preview");
 const deviceSelect = document.querySelector("#device");
 const projectSelect = document.querySelector("#project");
@@ -33,6 +31,11 @@ function authHeaders() {
   return value ? { "X-Access-Token": value } : {};
 }
 
+function selectedTemplateSource() {
+  const checked = document.querySelector('input[name="template_source"]:checked');
+  return checked ? checked.value : "default";
+}
+
 async function readJson(response) {
   const data = await response.json().catch(() => ({}));
   if (!response.ok) {
@@ -46,31 +49,23 @@ function buildFormData(extra = {}) {
   data.set("prefix", prefixInput.value.trim());
   data.set("device", deviceSelect.value);
   data.set("project", projectSelect.value);
-  data.set("use_default_template", useDefaultTemplate.checked ? "true" : "false");
+  data.set("template_source", selectedTemplateSource());
+  data.set("custom_work_order_names", customWorkOrderNamesInput.value.trim());
   if (token()) {
     data.set("access_token", token());
   }
   Object.entries(extra).forEach(([key, value]) => data.set(key, value));
-  if (!useDefaultTemplate.checked && customTemplateInput.files[0]) {
+  if (selectedTemplateSource() === "upload" && customTemplateInput.files[0]) {
     data.set("custom_template", customTemplateInput.files[0]);
-  }
-  data.set("add_custom_work_order", addCustomWorkOrder.checked ? "true" : "false");
-  if (addCustomWorkOrder.checked) {
-    data.set("custom_work_order_name", customWorkOrderNameInput.value.trim());
   }
   return data;
 }
 
-function validateSelection() {
-  if (!deviceSelect.value || !projectSelect.value) {
-    throw new Error("Select a device and a project.");
-  }
-  if (!useDefaultTemplate.checked && !customTemplateInput.files[0]) {
-    throw new Error("Upload Custom Work Order Template (.zip) or use the default template.");
-  }
-  if (addCustomWorkOrder.checked && !customWorkOrderNameInput.value.trim()) {
-    throw new Error("Enter a work order name.");
-  }
+function parseCommaNames(raw) {
+  return (raw || "")
+    .split(",")
+    .map((part) => part.trim())
+    .filter(Boolean);
 }
 
 function resolveCustomWorkOrderFolder(prefix, rawName) {
@@ -89,18 +84,27 @@ function resolveCustomWorkOrderFolder(prefix, rawName) {
 }
 
 function updateCustomWorkOrderPreview() {
-  const show = addCustomWorkOrder.checked;
-  customWorkOrderField.hidden = !show;
-  customWorkOrderPreview.hidden = !show;
-  if (!show) {
-    customWorkOrderPreview.textContent = "Will create: —";
+  const prefix = prefixInput.value.trim() || "RK-";
+  const names = parseCommaNames(customWorkOrderNamesInput.value);
+  if (!names.length) {
+    customWorkOrderPreview.textContent = "Custom work orders: —";
     return;
   }
-  const prefix = prefixInput.value.trim() || "RK-";
-  const resolved = resolveCustomWorkOrderFolder(prefix, customWorkOrderNameInput.value);
-  customWorkOrderPreview.textContent = resolved
-    ? `Will create: ${resolved}`
-    : "Will create: —";
+  const resolved = names.map((name) => resolveCustomWorkOrderFolder(prefix, name));
+  customWorkOrderPreview.textContent = `Custom work orders: ${resolved.join(", ")}`;
+}
+
+function validateSelection() {
+  if (!deviceSelect.value || !projectSelect.value) {
+    throw new Error("Select a device and a project.");
+  }
+  const source = selectedTemplateSource();
+  if (source === "upload" && !customTemplateInput.files[0]) {
+    throw new Error("Upload Custom Work Order Template (.zip).");
+  }
+  if (source === "none" && !customWorkOrderNamesInput.value.trim()) {
+    throw new Error("Enter at least one Custom Work Order Name when No Template is selected.");
+  }
 }
 
 function updateActionButton() {
@@ -108,16 +112,18 @@ function updateActionButton() {
 }
 
 function toggleCustomTemplateField() {
-  customTemplateField.hidden = useDefaultTemplate.checked;
+  customTemplateField.hidden = selectedTemplateSource() !== "upload";
 }
 
 function resetFormDefaults(defaultPrefix = "RK-") {
-  useDefaultTemplate.checked = true;
+  const defaultRadio = document.querySelector('input[name="template_source"][value="default"]');
+  if (defaultRadio) {
+    defaultRadio.checked = true;
+  }
   dryRunBox.checked = true;
   prefixInput.value = defaultPrefix;
   customTemplateInput.value = "";
-  addCustomWorkOrder.checked = false;
-  customWorkOrderNameInput.value = "";
+  customWorkOrderNamesInput.value = "";
   toggleCustomTemplateField();
   updateCustomWorkOrderPreview();
   updateActionButton();
@@ -133,11 +139,12 @@ function renderPreview(data) {
   document.querySelector("#existing-count").textContent = data.totals?.existing ?? "—";
   previewBody.innerHTML = "";
   if (!data.rows?.length) {
-    previewBody.innerHTML = '<tr><td colspan="3" class="empty">No work orders found in the template.</td></tr>';
+    previewBody.innerHTML =
+      '<tr><td colspan="4" class="empty">No work orders found for this selection.</td></tr>';
   } else {
     data.rows.forEach((row) => {
       const tr = document.createElement("tr");
-      tr.innerHTML = `<td>${row.work_order}</td><td>${row.status}</td><td>${row.action}</td>`;
+      tr.innerHTML = `<td>${row.work_order}</td><td>${row.source || "—"}</td><td>${row.status}</td><td>${row.action}</td>`;
       previewBody.appendChild(tr);
     });
   }
@@ -201,9 +208,10 @@ function fillSelect(select, values, placeholder) {
   });
 }
 
-useDefaultTemplate.addEventListener("change", toggleCustomTemplateField);
-addCustomWorkOrder.addEventListener("change", updateCustomWorkOrderPreview);
-customWorkOrderNameInput.addEventListener("input", updateCustomWorkOrderPreview);
+templateSourceInputs.forEach((input) => {
+  input.addEventListener("change", toggleCustomTemplateField);
+});
+customWorkOrderNamesInput.addEventListener("input", updateCustomWorkOrderPreview);
 prefixInput.addEventListener("input", updateCustomWorkOrderPreview);
 dryRunBox.addEventListener("change", updateActionButton);
 resetFormDefaults();

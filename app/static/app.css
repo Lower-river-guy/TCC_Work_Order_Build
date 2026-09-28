@@ -75,6 +75,15 @@ input[type="text"], input[type="password"], input[type="file"], select {
 .split { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin: 12px 0; }
 .actions { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 12px; }
 .check { display: flex; align-items: center; gap: 8px; margin-top: 12px; }
+.template-source {
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  margin: 12px 0;
+  padding: 12px 14px;
+}
+.template-source legend { font-weight: 650; padding: 0 4px; }
+.radio { display: flex; align-items: center; gap: 8px; margin: 8px 0; font-weight: normal; }
+.hint { font-weight: normal; color: var(--muted, #5a6b62); font-size: 0.88em; }
 
 button {
   border: 0;

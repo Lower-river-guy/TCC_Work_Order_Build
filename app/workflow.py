@@ -2,11 +2,13 @@
 
 from __future__ import annotations
 
+import shutil
 import tempfile
 from dataclasses import dataclass
 from pathlib import Path
 
 from app.builder import build_work_orders
+from app.custom_work_order import add_custom_work_orders_to_staging
 from app.ftp_client import (
     compare_work_orders,
     connect_ftp,
@@ -15,10 +17,14 @@ from app.ftp_client import (
     upload_work_orders,
 )
 from app.ftp_guard import ReadOnlyFTP
-from app.custom_work_order import add_custom_work_order_to_staging
 from app.prefix import validate_prefix
-from app.settings import MASTER_TEMPLATE_SEARCH
-from app.template_source import TemplateSelection, load_template_zip_bytes, prepare_template_root
+from app.settings import MASTER_TEMPLATE_SEARCH, STAGING_FOLDER_NAME
+from app.template_source import (
+    TEMPLATE_SOURCE_NONE,
+    TemplateSelection,
+    resolve_template_selection,
+    prepare_template_root,
+)
 
 
 @dataclass(frozen=True)
@@ -26,39 +32,65 @@ class OperationRequest:
     prefix: str
     device: str
     project: str
-    use_default_template: bool
+    template_source: str
     custom_bytes: bytes | None = None
     custom_filename: str | None = None
-    add_custom_work_order: bool = False
-    custom_work_order_name: str | None = None
+    custom_work_order_names: str = ""
 
 
-def build_staging(request: OperationRequest, work_root: Path) -> tuple[Path, list[str], str, TemplateSelection]:
+def _template_source_label(kind: str) -> str:
+    if kind == "upload":
+        return "Uploaded Template"
+    if kind == "default":
+        return "Default"
+    return "Custom"
+
+
+def build_staging(
+    request: OperationRequest, work_root: Path
+) -> tuple[Path, list[str], str, TemplateSelection, dict[str, str]]:
     validated_prefix = validate_prefix(request.prefix)
-    zip_bytes, template = load_template_zip_bytes(
-        use_default=request.use_default_template,
-        custom_bytes=request.custom_bytes,
-        custom_filename=request.custom_filename,
+    zip_bytes, template = resolve_template_selection(
+        request.template_source,
+        request.custom_bytes,
+        request.custom_filename,
     )
-    input_root = prepare_template_root(zip_bytes, work_root)
-    built_zip, report = build_work_orders(input_root, MASTER_TEMPLATE_SEARCH, validated_prefix)
-    staging = stage_work_orders(built_zip, work_root)
-    custom_folder = add_custom_work_order_to_staging(
-        staging,
-        validated_prefix,
-        enabled=request.add_custom_work_order,
-        raw_name=request.custom_work_order_name,
+
+    template_work_orders: list[str] = []
+    staging = work_root / STAGING_FOLDER_NAME
+    if staging.exists():
+        shutil.rmtree(staging)
+
+    if template.kind == TEMPLATE_SOURCE_NONE:
+        staging.mkdir(parents=True, exist_ok=True)
+    else:
+        input_root = prepare_template_root(zip_bytes, work_root)
+        built_zip, report = build_work_orders(input_root, MASTER_TEMPLATE_SEARCH, validated_prefix)
+        staging = stage_work_orders(built_zip, work_root)
+        template_work_orders = list(report.work_orders)
+
+    custom_folders = add_custom_work_orders_to_staging(
+        staging, validated_prefix, request.custom_work_order_names
     )
-    work_orders = list(report.work_orders)
-    if custom_folder and custom_folder not in work_orders:
-        work_orders.append(custom_folder)
-    return staging, work_orders, validated_prefix, template
+
+    sources: dict[str, str] = {}
+    for name in template_work_orders:
+        sources[name] = _template_source_label(template.kind)
+    for name in custom_folders:
+        if name not in sources and (staging / name).is_dir():
+            sources[name] = "Custom"
+
+    work_orders = sorted(
+        (path.name for path in staging.iterdir() if path.is_dir()),
+        key=str.lower,
+    )
+    return staging, work_orders, validated_prefix, template, sources
 
 
 def preview_on_tcc(request: OperationRequest):
     with tempfile.TemporaryDirectory(prefix="tcc-wo-") as temp_name:
         work_root = Path(temp_name)
-        staging, _names, prefix, template = build_staging(request, work_root)
+        staging, _names, prefix, template, sources = build_staging(request, work_root)
         ftp = connect_ftp()
         try:
             guarded = ReadOnlyFTP(ftp, read_only=True)
@@ -74,6 +106,7 @@ def preview_on_tcc(request: OperationRequest):
                 prefix,
                 template.label,
                 inside,
+                staging_sources=sources,
             )
         finally:
             _close(ftp)
@@ -85,7 +118,7 @@ def run_on_tcc(request: OperationRequest, *, dry_run: bool, confirm_upload: bool
 
     with tempfile.TemporaryDirectory(prefix="tcc-wo-") as temp_name:
         work_root = Path(temp_name)
-        staging, _names, prefix, template = build_staging(request, work_root)
+        staging, _names, prefix, template, sources = build_staging(request, work_root)
         ftp = connect_ftp()
         try:
             if dry_run:
@@ -102,6 +135,7 @@ def run_on_tcc(request: OperationRequest, *, dry_run: bool, confirm_upload: bool
                     prefix,
                     template.label,
                     inside,
+                    staging_sources=sources,
                 )
             device_name, project_name, _target, _inside = navigate_to_work_orders(
                 ftp, request.device, request.project, dry_run=False
@@ -113,6 +147,7 @@ def run_on_tcc(request: OperationRequest, *, dry_run: bool, confirm_upload: bool
                 template.label,
                 device_name,
                 project_name,
+                staging_sources=sources,
             )
         finally:
             _close(ftp)

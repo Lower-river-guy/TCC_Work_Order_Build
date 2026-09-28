@@ -11,7 +11,7 @@
     <p class="brand"><span>&gt;&lt;(((º&gt;</span><span>&gt;&lt;(((º&gt;</span><strong>RK</strong><span>&gt;&lt;(((º&gt;</span></p>
     <div>
       <h1>{{ app_name }}</h1>
-      <p class="lede">Build work orders from the default or a custom template, then upload only new folders to TCC.</p>
+      <p class="lede">Build work orders from a template, custom names, or both, then upload only new folders to TCC.</p>
     </div>
     <p class="version">v{{ version }}</p>
   </header>
@@ -31,11 +31,21 @@
       <h2>1. Selection</h2>
       <p id="ftp-status" class="note">Checking server…</p>
 
-      <h3 class="subhead">Template</h3>
-      <label class="check">
-        <input id="use-default-template" type="checkbox" checked autocomplete="off">
-        Use Default Work Order Template
-      </label>
+      <fieldset class="template-source">
+        <legend>Template Source</legend>
+        <label class="radio">
+          <input type="radio" name="template_source" value="default" checked autocomplete="off">
+          Default Template
+        </label>
+        <label class="radio">
+          <input type="radio" name="template_source" value="upload" autocomplete="off">
+          Upload Custom ZIP
+        </label>
+        <label class="radio">
+          <input type="radio" name="template_source" value="none" autocomplete="off">
+          No Template — Custom Work Orders Only
+        </label>
+      </fieldset>
       <label id="custom-template-field" hidden>
         Upload Custom Work Order Template (.zip)
         <input id="custom-template" name="custom_template" type="file" accept=".zip,application/zip">
@@ -46,16 +56,11 @@
         <input id="prefix" type="text" value="{{ default_prefix }}" maxlength="50" autocomplete="off">
       </label>
 
-      <h3 class="subhead">Custom Work Order</h3>
-      <label class="check">
-        <input id="add-custom-work-order" type="checkbox" autocomplete="off">
-        Add Custom Work Order
+      <label>
+        Custom Work Order Names <span class="hint">(optional)</span>
+        <input id="custom-work-order-names" type="text" maxlength="2000" autocomplete="off" placeholder="Test, Test 2, Test 3">
       </label>
-      <label id="custom-work-order-field" hidden>
-        Work Order Name
-        <input id="custom-work-order-name" type="text" maxlength="200" autocomplete="off" placeholder="Wall Drains">
-      </label>
-      <p id="custom-work-order-preview" class="note" hidden>Will create: —</p>
+      <p id="custom-work-order-preview" class="note">Custom work orders: —</p>
 
       <div class="split">
         <label>
@@ -96,12 +101,13 @@
           <thead>
             <tr>
               <th>Work Order</th>
+              <th>Source</th>
               <th>Status</th>
               <th>Action</th>
             </tr>
           </thead>
           <tbody id="preview-body">
-            <tr><td colspan="3" class="empty">Choose template, prefix, device, and project, then run Preview.</td></tr>
+            <tr><td colspan="4" class="empty">Choose template source, prefix, device, and project, then run Preview.</td></tr>
           </tbody>
         </table>
       </div>

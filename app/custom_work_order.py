@@ -1,4 +1,4 @@
-"""Optional single work order added outside the template ZIP."""
+"""Comma-separated custom work orders added outside (or instead of) a template."""
 
 from __future__ import annotations
 
@@ -11,37 +11,64 @@ _UNSAFE = re.compile(r'[\\/:*?"<>|]')
 _CONTROL = re.compile(r"[\x00-\x1f]")
 
 
-def validate_custom_work_order_name(raw: str) -> str:
-    """Validate the user-entered work order name (suffix or prefixed)."""
+def validate_custom_base_name(raw: str) -> str:
+    """Validate one comma-separated base name (prefix not included)."""
     cleaned = (raw or "").strip()
     if not cleaned:
-        raise ValueError("Enter a work order name.")
+        raise ValueError("Work order name cannot be blank.")
     if cleaned in {".", ".."} or ".." in cleaned:
-        raise ValueError("Work order name contains invalid path characters.")
+        raise ValueError(f'Invalid work order name "{cleaned}": path characters are not allowed.')
     if "/" in cleaned or "\\" in cleaned:
-        raise ValueError("Work order name must not contain path separators.")
+        raise ValueError(f'Invalid work order name "{cleaned}": must not contain path separators.')
     if _CONTROL.search(cleaned):
-        raise ValueError("Work order name contains invalid control characters.")
+        raise ValueError(f'Invalid work order name "{cleaned}": control characters are not allowed.')
     if _UNSAFE.search(cleaned):
-        raise ValueError("Work order name contains invalid characters.")
+        raise ValueError(f'Invalid work order name "{cleaned}": invalid filename characters.')
     if len(cleaned) > 200:
-        raise ValueError("Work order name must be 200 characters or fewer.")
+        raise ValueError(f'Invalid work order name "{cleaned}": must be 200 characters or fewer.')
     return cleaned
 
 
 def resolve_custom_work_order_folder(prefix: str, raw_name: str) -> str:
-    """Build the final FTP folder name, avoiding a duplicated prefix."""
-    cleaned = validate_custom_work_order_name(raw_name)
+    """Build the final folder name, avoiding a duplicated prefix."""
+    cleaned = validate_custom_base_name(raw_name)
     body = cleaned
     if body.lower().startswith(prefix.lower()):
         body = body[len(prefix) :].strip()
         if not body:
-            raise ValueError("Enter a work order name.")
-        validate_custom_work_order_name(body)
+            raise ValueError(f'Invalid work order name "{raw_name}": enter a name after the prefix.')
+        validate_custom_base_name(body)
     folder = f"{prefix}{body}"
     if ".." in folder or "/" in folder or "\\" in folder:
-        raise ValueError("Work order name contains invalid path characters.")
+        raise ValueError(f'Invalid work order name "{raw_name}": path characters are not allowed.')
     return folder
+
+
+def parse_comma_separated_base_names(raw: str) -> list[str]:
+    """Split, trim, and drop empty comma-separated entries."""
+    if not (raw or "").strip():
+        return []
+    names: list[str] = []
+    for part in raw.split(","):
+        cleaned = part.strip()
+        if cleaned:
+            names.append(cleaned)
+    return names
+
+
+def resolve_custom_work_order_folders(prefix: str, raw: str) -> list[str]:
+    """Parse comma-separated names and return unique final folder names."""
+    bases = parse_comma_separated_base_names(raw)
+    folders: list[str] = []
+    seen: set[str] = set()
+    for base in bases:
+        folder = resolve_custom_work_order_folder(prefix, base)
+        key = folder.lower()
+        if key in seen:
+            raise ValueError(f'Duplicate work order name: {folder}')
+        seen.add(key)
+        folders.append(folder)
+    return folders
 
 
 def materialize_custom_work_order(staging: Path, folder_name: str) -> bool:
@@ -56,16 +83,9 @@ def materialize_custom_work_order(staging: Path, folder_name: str) -> bool:
     return True
 
 
-def add_custom_work_order_to_staging(
-    staging: Path,
-    prefix: str,
-    *,
-    enabled: bool,
-    raw_name: str | None,
-) -> str | None:
-    """Optionally add one custom work order folder to the staging tree."""
-    if not enabled:
-        return None
-    folder_name = resolve_custom_work_order_folder(prefix, raw_name or "")
-    materialize_custom_work_order(staging, folder_name)
-    return folder_name
+def add_custom_work_orders_to_staging(staging: Path, prefix: str, raw_names: str) -> list[str]:
+    """Materialize all custom work orders. Returns folder names requested (materialized or skipped)."""
+    folders = resolve_custom_work_order_folders(prefix, raw_names)
+    for folder in folders:
+        materialize_custom_work_order(staging, folder)
+    return folders

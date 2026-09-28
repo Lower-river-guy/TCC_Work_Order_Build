@@ -25,10 +25,12 @@ class WorkOrderRow:
     work_order: str
     status: str
     action: str
+    source: str = ""
 
     def as_dict(self) -> dict[str, str]:
         return {
             "work_order": self.work_order,
+            "source": self.source,
             "status": self.status,
             "action": self.action,
         }
@@ -260,19 +262,26 @@ def _enter_work_orders_folder(ftp, dry_run: bool, log: list[str]) -> bool:
     return True
 
 
-def _plan_rows(staging: Path, remote_names: set[str], dry_run: bool) -> tuple[list[WorkOrderRow], dict[str, int]]:
+def _plan_rows(
+    staging: Path,
+    remote_names: set[str],
+    dry_run: bool,
+    staging_sources: dict[str, str] | None = None,
+) -> tuple[list[WorkOrderRow], dict[str, int]]:
     rows: list[WorkOrderRow] = []
     new_count = 0
     existing_count = 0
+    sources = staging_sources or {}
     for item in sorted(staging.iterdir(), key=lambda path: path.name.lower()):
         if not item.is_dir():
             continue
+        source = sources.get(item.name, "Custom")
         if item.name.lower() in remote_names:
-            rows.append(WorkOrderRow(item.name, "Existing", "Skip"))
+            rows.append(WorkOrderRow(item.name, "Existing", "Skip", source=source))
             existing_count += 1
         else:
             action = "Would Upload" if dry_run else "Upload"
-            rows.append(WorkOrderRow(item.name, "New", action))
+            rows.append(WorkOrderRow(item.name, "New", action, source=source))
             new_count += 1
     totals = {
         "total": len(rows),
@@ -291,12 +300,13 @@ def compare_work_orders(
     prefix: str,
     template_label: str,
     inside_work_orders: bool,
+    staging_sources: dict[str, str] | None = None,
 ) -> UploadReport:
     remote_names: set[str] = set()
     if inside_work_orders:
         remote_names = {name.lower() for name in ftp_list_directories(ftp)}
 
-    rows, totals = _plan_rows(staging, remote_names, dry_run=True)
+    rows, totals = _plan_rows(staging, remote_names, dry_run=True, staging_sources=staging_sources)
     uploaded = 0
     directories = 0
     for item in staging.iterdir():
@@ -413,9 +423,20 @@ def upload_work_orders(
     template_label: str,
     device_name: str,
     project_name: str,
+    staging_sources: dict[str, str] | None = None,
 ) -> UploadReport:
     """Upload new work orders. FTP must already be inside the project's Work Orders folder."""
     uploaded, directories, skipped, rows = upload_tree(ftp, staging, log := [])
+    if staging_sources:
+        rows = [
+            WorkOrderRow(
+                row.work_order,
+                row.status,
+                row.action,
+                source=staging_sources.get(row.work_order, "Custom"),
+            )
+            for row in rows
+        ]
     log.insert(0, f"[PREFIX] {prefix}")
     log.insert(0, f"[TEMPLATE] {template_label}")
     totals = {

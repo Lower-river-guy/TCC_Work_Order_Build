@@ -9,6 +9,7 @@ from flask import Flask, jsonify, render_template, request
 
 from app import ftp_client, workflow
 from app.settings import APP_NAME, APP_VERSION, DEFAULT_PREFIX, max_upload_bytes
+from app.template_source import TEMPLATE_SOURCE_NONE, normalize_template_source
 from app.workflow import OperationRequest
 
 
@@ -144,28 +145,30 @@ def _parse_operation_request() -> OperationRequest:
     project = (payload.get("project") or "").strip()
     if not device or not project:
         raise ValueError("Select a device and a project.")
-    use_default = _parse_bool(payload.get("use_default_template", "true"))
+    template_source = normalize_template_source(
+        payload.get("template_source", payload.get("use_default_template", "default"))
+    )
     custom_bytes = None
     custom_filename = None
-    if not use_default:
+    if template_source == "upload":
         upload = request.files.get("custom_template")
         if upload is None or not upload.filename:
-            raise ValueError("Upload Custom Work Order Template (.zip) or use the default template.")
+            raise ValueError("Upload Custom Work Order Template (.zip).")
         custom_filename = upload.filename
         custom_bytes = upload.read()
-    add_custom = _parse_bool(payload.get("add_custom_work_order", "false"))
-    custom_work_order_name = (payload.get("custom_work_order_name") or "").strip()
-    if add_custom and not custom_work_order_name:
-        raise ValueError("Enter a work order name.")
+    custom_work_order_names = (payload.get("custom_work_order_names") or "").strip()
+    if not custom_work_order_names and payload.get("custom_work_order_name"):
+        custom_work_order_names = str(payload.get("custom_work_order_name")).strip()
+    if template_source == TEMPLATE_SOURCE_NONE and not custom_work_order_names.strip():
+        raise ValueError("Enter at least one Custom Work Order Name when No Template is selected.")
     return OperationRequest(
         prefix=(payload.get("prefix") or DEFAULT_PREFIX).strip(),
         device=device,
         project=project,
-        use_default_template=use_default,
+        template_source=template_source,
         custom_bytes=custom_bytes,
         custom_filename=custom_filename,
-        add_custom_work_order=add_custom,
-        custom_work_order_name=custom_work_order_name if add_custom else None,
+        custom_work_order_names=custom_work_order_names,
     )
 
 
