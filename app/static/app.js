@@ -70,6 +70,15 @@ function toggleCustomTemplateField() {
   customTemplateField.hidden = useDefaultTemplate.checked;
 }
 
+function resetFormDefaults(defaultPrefix = "RK-") {
+  useDefaultTemplate.checked = true;
+  dryRunBox.checked = true;
+  prefixInput.value = defaultPrefix;
+  customTemplateInput.value = "";
+  toggleCustomTemplateField();
+  updateActionButton();
+}
+
 function renderPreview(data) {
   lastPreview = data;
   templateLine.textContent = `Template: ${data.template || "—"}`;
@@ -150,10 +159,12 @@ function fillSelect(select, values, placeholder) {
 
 useDefaultTemplate.addEventListener("change", toggleCustomTemplateField);
 dryRunBox.addEventListener("change", updateActionButton);
-useDefaultTemplate.checked = true;
-dryRunBox.checked = true;
-toggleCustomTemplateField();
-updateActionButton();
+resetFormDefaults();
+window.addEventListener("pageshow", (event) => {
+  if (event.persisted) {
+    resetFormDefaults(prefixInput.value.trim() || "RK-");
+  }
+});
 
 document.querySelector("#load-devices").addEventListener("click", async () => {
   ftpStatus.textContent = "Loading devices…";
@@ -226,11 +237,7 @@ async function loadConfig() {
   try {
     const data = await readJson(await fetch("/api/config"));
     accessPanel.hidden = !data.access_required;
-    prefixInput.value = data.default_prefix || "RK-";
-    useDefaultTemplate.checked = true;
-    dryRunBox.checked = true;
-    toggleCustomTemplateField();
-    updateActionButton();
+    resetFormDefaults(data.default_prefix || "RK-");
     ftpStatus.textContent = data.ftp_configured
       ? "FTP credentials are configured. Load devices to begin."
       : "FTP credentials are not configured. Set TCC_T48_DEVICE_USER and TCC_T48_DEVICE_PASS on the server.";

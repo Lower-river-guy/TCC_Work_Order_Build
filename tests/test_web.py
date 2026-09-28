@@ -74,6 +74,8 @@ class WebTests(unittest.TestCase):
         self.assertIn(DEFAULT_PREFIX, html)
         self.assertIn('id="custom-template-field"', html)
         self.assertIn("hidden", html)
+        self.assertIn('id="dry-run" type="checkbox" checked', html)
+        self.assertIn(f'app.js?v={APP_VERSION}', html)
 
     def test_config_defaults(self):
         config = self.client.get("/api/config").get_json()
