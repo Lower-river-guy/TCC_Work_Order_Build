@@ -4,27 +4,16 @@ from __future__ import annotations
 
 import hmac
 import os
-import tempfile
-from io import BytesIO
-from pathlib import Path
 
-from flask import Flask, jsonify, render_template, request, send_file
+from flask import Flask, jsonify, render_template, request
 
-from app import ftp_client
-from app.builder import build_work_orders, extract_template_zip
-from app.settings import (
-    APP_NAME,
-    APP_VERSION,
-    DEFAULT_REPLACE,
-    DEFAULT_SEARCH,
-    ZIP_FILE_NAME,
-    max_upload_bytes,
-)
+from app import ftp_client, workflow
+from app.grade_checkers import grade_checkers_for_api
+from app.settings import APP_NAME, APP_VERSION
 
 
 def create_app() -> Flask:
     app = Flask(__name__)
-    app.config["MAX_CONTENT_LENGTH"] = max_upload_bytes()
 
     @app.before_request
     def require_access_token():
@@ -33,11 +22,12 @@ def create_app() -> Flask:
         expected = os.environ.get("APP_ACCESS_TOKEN", "").strip()
         if not expected:
             return None
-        provided = (
-            request.headers.get("X-Access-Token", "")
-            or request.form.get("access_token", "")
-            or request.args.get("access_token", "")
-        )
+        provided = request.headers.get("X-Access-Token", "") or request.args.get("access_token", "")
+        if not provided:
+            provided = request.form.get("access_token", "")
+        if not provided and request.is_json:
+            payload = request.get_json(silent=True) or {}
+            provided = payload.get("access_token", "")
         if not _token_matches(provided, expected):
             return jsonify(error="Unauthorized"), 401
         return None
@@ -48,8 +38,6 @@ def create_app() -> Flask:
             "index.html",
             app_name=APP_NAME,
             version=APP_VERSION,
-            default_search=DEFAULT_SEARCH,
-            default_replace=DEFAULT_REPLACE,
         )
 
     @app.get("/health")
@@ -62,41 +50,9 @@ def create_app() -> Flask:
             version=APP_VERSION,
             access_required=bool(os.environ.get("APP_ACCESS_TOKEN", "").strip()),
             ftp_configured=ftp_client.credentials_configured(),
-            default_search=DEFAULT_SEARCH,
-            default_replace=DEFAULT_REPLACE,
+            grade_checkers=grade_checkers_for_api(),
+            dry_run_default=True,
         )
-
-    @app.post("/api/preview")
-    def preview():
-        try:
-            _zip_bytes, report = _build_from_request()
-        except ValueError as error:
-            return jsonify(error=str(error)), 400
-        return jsonify(
-            work_orders=report.work_orders,
-            existing_files=report.existing_files,
-            placeholder_files=report.placeholder_files,
-            output_folders=report.output_folders,
-            directory_entries=report.directory_entries,
-            skipped_files=report.skipped_files,
-            log=report.log,
-        )
-
-    @app.post("/api/build")
-    def build():
-        try:
-            zip_bytes, report = _build_from_request()
-        except ValueError as error:
-            return jsonify(error=str(error)), 400
-        download = BytesIO(zip_bytes)
-        response = send_file(
-            download,
-            mimetype="application/zip",
-            as_attachment=True,
-            download_name=ZIP_FILE_NAME,
-        )
-        response.headers["X-Work-Orders"] = str(len(report.work_orders))
-        return response
 
     @app.get("/api/ftp/devices")
     def ftp_devices():
@@ -129,48 +85,76 @@ def create_app() -> Flask:
             _close_ftp(ftp)
         return jsonify(device=device, projects=projects)
 
-    @app.post("/api/ftp/upload")
-    def ftp_upload():
-        dry_run = _wants_dry_run()
-        device = request.form.get("device", "")
-        project = request.form.get("project", "")
+    @app.post("/api/work-orders/preview")
+    def work_orders_preview():
+        payload = _json_or_form()
         try:
-            zip_bytes, _report = _build_from_request()
+            grade_checker_id, device, project = _require_selection(payload)
+            report = workflow.preview_on_tcc(grade_checker_id, device, project)
         except ValueError as error:
             return jsonify(error=str(error)), 400
-
-        try:
-            ftp = ftp_client.connect_ftp()
-        except RuntimeError as error:
-            return jsonify(error=str(error)), 400
-
-        try:
-            with tempfile.TemporaryDirectory(prefix="tcc-stage-") as temp_name:
-                staging = ftp_client.stage_work_orders(zip_bytes, Path(temp_name))
-                result = ftp_client.upload_work_orders(ftp, staging, device, project, dry_run)
+        except FileNotFoundError as error:
+            return jsonify(error=str(error)), 503
         except RuntimeError as error:
             return jsonify(error=str(error)), 400
         except Exception as error:
             return jsonify(error=_public_error(error)), 502
-        finally:
-            _close_ftp(ftp)
+        return jsonify(report.as_dict())
 
-        return jsonify(
-            dry_run=result.dry_run,
-            device=result.device,
-            project=result.project,
-            target=result.target,
-            directories=result.directories,
-            files=result.files,
-            skipped_existing_work_orders=result.skipped_existing_work_orders,
-            log=result.log,
-        )
-
-    @app.errorhandler(413)
-    def too_large(_error):
-        return jsonify(error="Upload exceeds the size limit."), 413
+    @app.post("/api/work-orders/run")
+    def work_orders_run():
+        payload = _json_or_form()
+        dry_run = _parse_dry_run(payload.get("dry_run", "true"))
+        confirm_upload = _parse_bool(payload.get("confirm_upload", "false"))
+        try:
+            grade_checker_id, device, project = _require_selection(payload)
+            report = workflow.run_on_tcc(
+                grade_checker_id,
+                device,
+                project,
+                dry_run=dry_run,
+                confirm_upload=confirm_upload,
+            )
+        except ValueError as error:
+            return jsonify(error=str(error)), 400
+        except FileNotFoundError as error:
+            return jsonify(error=str(error)), 503
+        except RuntimeError as error:
+            return jsonify(error=str(error)), 400
+        except Exception as error:
+            return jsonify(error=_public_error(error)), 502
+        return jsonify(report.as_dict())
 
     return app
+
+
+def _json_or_form() -> dict:
+    if request.is_json:
+        return dict(request.get_json(silent=True) or {})
+    return dict(request.form)
+
+
+def _require_selection(payload: dict) -> tuple[str, str, str]:
+    grade_checker_id = (payload.get("grade_checker_id") or "").strip()
+    device = (payload.get("device") or "").strip()
+    project = (payload.get("project") or "").strip()
+    if not grade_checker_id:
+        raise ValueError("Select a grade checker.")
+    if not device or not project:
+        raise ValueError("Select a device and a project.")
+    return grade_checker_id, device, project
+
+
+def _parse_dry_run(raw: object) -> bool:
+    if isinstance(raw, bool):
+        return raw
+    return str(raw).strip().lower() not in {"0", "false", "no", "off"}
+
+
+def _parse_bool(raw: object) -> bool:
+    if isinstance(raw, bool):
+        return raw
+    return str(raw).strip().lower() in {"1", "true", "yes", "on"}
 
 
 def _token_matches(provided: str, expected: str) -> bool:
@@ -179,27 +163,6 @@ def _token_matches(provided: str, expected: str) -> bool:
     if len(provided_bytes) != len(expected_bytes):
         return False
     return hmac.compare_digest(provided_bytes, expected_bytes)
-
-
-def _wants_dry_run() -> bool:
-    raw = request.form.get("dry_run", "true").strip().lower()
-    return raw not in {"0", "false", "no", "off"}
-
-
-def _build_from_request():
-    upload = request.files.get("template")
-    if upload is None or not upload.filename:
-        raise ValueError("Choose a ZIP of the work-order template folders.")
-    if not upload.filename.lower().endswith(".zip"):
-        raise ValueError("The template must be a .zip file.")
-    payload = upload.read()
-    if not payload:
-        raise ValueError("The uploaded ZIP is empty.")
-    search = request.form.get("search", DEFAULT_SEARCH)
-    replacement = request.form.get("replace", DEFAULT_REPLACE)
-    with tempfile.TemporaryDirectory(prefix="tcc-template-") as temp_name:
-        input_root = extract_template_zip(payload, Path(temp_name))
-        return build_work_orders(input_root, search, replacement)
 
 
 def _close_ftp(ftp) -> None:

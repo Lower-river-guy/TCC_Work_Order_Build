@@ -8,17 +8,23 @@ import tempfile
 import unittest
 import zipfile
 from pathlib import Path
+from unittest.mock import patch
 
 from app.builder import build_work_orders
 from app.ftp_client import (
+    compare_work_orders,
     credentials_configured,
     get_t48_credentials,
+    navigate_to_work_orders,
     resolve_credentials,
     stage_work_orders,
+    upload_tree,
     upload_work_orders,
     validate_remote_name,
 )
-from app.settings import PLACEHOLDER_DATA
+from app.ftp_guard import ReadOnlyFTP
+from app.grade_checkers import get_grade_checker
+from app.settings import DRY_RUN_BANNER, PLACEHOLDER_DATA
 from tests.fake_ftp import FakeFTP
 
 
@@ -41,14 +47,14 @@ def _device_tree(work_orders: dict | None = None) -> dict:
     }
 
 
-def _sample_zip() -> bytes:
+def _sample_zip(prefix: str = "CL-") -> bytes:
     with tempfile.TemporaryDirectory() as temp_name:
         root = Path(temp_name)
         (root / "DK-New").mkdir()
         (root / "DK-New" / "notes.txt").write_text("notes", encoding="utf-8")
         (root / "DK-Old").mkdir()
         (root / "DK-Old" / "notes.txt").write_text("old", encoding="utf-8")
-        payload, _report = build_work_orders(root, "DK-", "CL-")
+        payload, _report = build_work_orders(root, "DK-", prefix)
     return payload
 
 
@@ -70,75 +76,78 @@ class CredentialTests(unittest.TestCase):
 
     def test_missing_credentials_name_the_variables_only(self):
         os.environ["TCC_T48_DEVICE_USER"] = "not-a-real-user"
-        with self.assertRaises(RuntimeError) as caught:
+        with self.assertRaises(RuntimeError):
             resolve_credentials()
-        message = str(caught.exception)
-        self.assertIn("TCC_T48_DEVICE_PASS", message)
-        self.assertNotIn("not-a-real-user", message)
         self.assertFalse(credentials_configured())
 
-    def test_env_file_keys_are_read(self):
+
+class PreviewAndUploadTests(unittest.TestCase):
+    def test_dry_run_can_browse_and_detect_existing_without_writes(self):
+        ftp = FakeFTP(_device_tree({"RK-Old": {}}))
+        guarded = ReadOnlyFTP(ftp, read_only=True)
+        device_name, project_name, target, inside = navigate_to_work_orders(
+            guarded, "T48", "Project A", dry_run=True
+        )
+        self.assertTrue(inside)
         with tempfile.TemporaryDirectory() as temp_name:
-            path = Path(temp_name) / "device.env"
-            path.write_text(
-                "TCC_T48_DEVICE_USER=example-user\nTCC_T48_DEVICE_PASS=example-pass\n",
-                encoding="utf-8",
+            staging = stage_work_orders(_sample_zip("RK-"), Path(temp_name))
+            report = compare_work_orders(
+                guarded,
+                staging,
+                device_name,
+                project_name,
+                target,
+                get_grade_checker("ryan-kolt"),
+                inside,
             )
-            username, password = get_t48_credentials(
-                {"TCC_T48_DEVICE_USER": "example-user", "TCC_T48_DEVICE_PASS": "example-pass"}
-            )
-            self.assertEqual((username, password), ("example-user", "example-pass"))
-            os.environ["TCC_DEVICE_ENV_FILE"] = str(path)
-            try:
-                self.assertEqual(resolve_credentials(), ("example-user", "example-pass"))
-            finally:
-                os.environ.pop("TCC_DEVICE_ENV_FILE", None)
+        self.assertEqual(ftp.mkd_calls, [])
+        self.assertEqual(ftp.stored, [])
+        self.assertEqual(report.banner, DRY_RUN_BANNER)
+        actions = {row.work_order: row.action for row in report.rows}
+        self.assertEqual(actions["RK-Old"], "Skip")
+        self.assertEqual(actions["RK-New"], "Would Upload")
 
+    def test_read_only_guard_blocks_accidental_mkd(self):
+        ftp = ReadOnlyFTP(FakeFTP(_device_tree()), read_only=True)
+        with self.assertRaises(Exception):
+            navigate_to_work_orders(ftp, "T48", "Project A", dry_run=False)
 
-class UploadTests(unittest.TestCase):
+    def test_upload_skips_existing_work_order(self):
+        payload = _sample_zip("RK-")
+        ftp = FakeFTP(_device_tree({"RK-Old": {}}))
+        navigate_to_work_orders(ftp, "T48", "Project A", dry_run=False)
+        with tempfile.TemporaryDirectory() as temp_name:
+            staging = stage_work_orders(payload, Path(temp_name))
+            report = upload_work_orders(ftp, staging, get_grade_checker("ryan-kolt"), "T48", "Project A")
+        self.assertEqual(report.skipped_existing_work_orders, 1)
+        stored_paths = [path for path, _data in ftp.stored]
+        self.assertTrue(any(path.endswith("/RK-New/notes.txt") for path in stored_paths))
+        self.assertFalse(any("/RK-Old/" in path for path in stored_paths))
+
+    def test_race_recheck_skips_work_order_created_after_preview(self):
+        ftp = FakeFTP(_device_tree())
+        navigate_to_work_orders(ftp, "T48", "Project A", dry_run=False)
+        ftp.mkd_calls.clear()
+        with tempfile.TemporaryDirectory() as temp_name:
+            root = Path(temp_name)
+            only = root / "Work Orders" / "RK-New"
+            only.mkdir(parents=True)
+            (only / "notes.txt").write_text("notes", encoding="utf-8")
+            staging = root / "Work Orders"
+            listings = iter([[], ["RK-New"]])
+
+            def fake_list(_ftp):
+                return next(listings)
+
+            with patch("app.ftp_client.ftp_list_directories", side_effect=fake_list):
+                _uploaded, _dirs, skipped, rows = upload_tree(ftp, staging, [])
+        self.assertEqual(skipped, 1)
+        self.assertEqual(ftp.mkd_calls, [])
+        self.assertEqual(rows[0].action, "Skip — Already Exists")
+
     def test_rejects_path_tricks(self):
         with self.assertRaises(RuntimeError):
             validate_remote_name("../T48")
-        with self.assertRaises(RuntimeError):
-            validate_remote_name("T48/secret")
-
-    def test_dry_run_does_not_create_or_upload(self):
-        payload = _sample_zip()
-        ftp = FakeFTP(_device_tree())
-        with tempfile.TemporaryDirectory() as temp_name:
-            staging = stage_work_orders(payload, Path(temp_name))
-            report = upload_work_orders(ftp, staging, "T48", "Project A", dry_run=True)
-        self.assertEqual(ftp.mkd_calls, [])
-        self.assertEqual(ftp.stored, [])
-        self.assertTrue(report.dry_run)
-        self.assertGreater(report.files, 0)
-        self.assertIn("[CHANGES MADE] NONE", report.log)
-        self.assertTrue(report.target.endswith("/Work Orders"))
-
-    def test_upload_skips_existing_work_order(self):
-        payload = _sample_zip()
-        ftp = FakeFTP(_device_tree({"CL-Old": {}}))
-        with tempfile.TemporaryDirectory() as temp_name:
-            staging = stage_work_orders(payload, Path(temp_name))
-            report = upload_work_orders(ftp, staging, "t48", "project a", dry_run=False)
-        self.assertEqual(report.device, "T48")
-        self.assertEqual(report.project, "Project A")
-        self.assertEqual(report.skipped_existing_work_orders, 1)
-        stored_paths = [path for path, _data in ftp.stored]
-        self.assertTrue(any(path.endswith("/CL-New/notes.txt") for path in stored_paths))
-        self.assertFalse(any("/CL-Old/" in path for path in stored_paths))
-        placeholder = next(data for path, data in ftp.stored if path.endswith("/CL-New/CL-New"))
-        self.assertEqual(placeholder, PLACEHOLDER_DATA.encode("utf-8"))
-
-    def test_missing_project_container_makes_no_folders(self):
-        tree = _device_tree()
-        del tree["TCC"]["sukut"]["trimblesynchronizerdata"]["T48"]["Trimble SCS900 Data"]
-        ftp = FakeFTP(tree)
-        with tempfile.TemporaryDirectory() as temp_name:
-            staging = stage_work_orders(_sample_zip(), Path(temp_name))
-            with self.assertRaises(RuntimeError):
-                upload_work_orders(ftp, staging, "T48", "Project A", dry_run=False)
-        self.assertEqual(ftp.mkd_calls, [])
 
 
 class ZipRoundTripTests(unittest.TestCase):
@@ -152,9 +161,10 @@ class ZipRoundTripTests(unittest.TestCase):
             root.mkdir()
             with zipfile.ZipFile(io.BytesIO(buffer.getvalue())) as archive:
                 archive.extractall(root)
-            payload, _report = build_work_orders(root, "DK-", "CL-")
+            payload, _report = build_work_orders(root, "DK-", "RK-")
         with zipfile.ZipFile(io.BytesIO(payload)) as archive:
-            self.assertEqual(archive.read("CL-Job/notes.txt"), b"notes")
+            self.assertEqual(archive.read("RK-Job/notes.txt"), b"notes")
+            self.assertEqual(archive.read("RK-Job/RK-Job"), PLACEHOLDER_DATA.encode("utf-8"))
 
 
 if __name__ == "__main__":

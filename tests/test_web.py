@@ -6,16 +6,18 @@ import io
 import os
 import unittest
 import zipfile
+from pathlib import Path
 from unittest.mock import patch
 
 from app.main import create_app
+from app.settings import APP_VERSION
 from tests.fake_ftp import FakeFTP
 
 
-def _template_zip() -> bytes:
+def _master_zip() -> bytes:
     buffer = io.BytesIO()
     with zipfile.ZipFile(buffer, "w") as archive:
-        archive.writestr("Template/DK-Job/notes.txt", b"notes")
+        archive.writestr("DK-Job/notes.txt", b"notes")
     return buffer.getvalue()
 
 
@@ -26,7 +28,7 @@ def _tree() -> dict:
                 "trimblesynchronizerdata": {
                     "T48": {
                         "Trimble SCS900 Data": {
-                            "Project A": {},
+                            "Project A": {"Work Orders": {}},
                         }
                     }
                 }
@@ -57,85 +59,108 @@ class WebTests(unittest.TestCase):
             else:
                 os.environ[key] = value
 
-    def _post_template(self, url: str, **extra):
-        data = {
-            "template": (io.BytesIO(_template_zip()), "template.zip"),
-            "search": "DK-",
-            "replace": "CL-",
-        }
-        data.update(extra)
-        return self.client.post(url, data=data)
+    def _json_post(self, url: str, payload: dict):
+        return self.client.post(url, json=payload, content_type="application/json")
 
-    def test_health_and_page(self):
+    def test_health_and_page_without_zip_controls(self):
         health = self.client.get("/health")
         self.assertEqual(health.status_code, 200)
-        self.assertEqual(health.get_json()["version"], "0.01.00")
+        self.assertEqual(health.get_json()["version"], APP_VERSION)
         page = self.client.get("/")
         self.assertEqual(page.status_code, 200)
-        self.assertIn(b"TCC Work Order Builder", page.data)
+        html = page.data.decode("utf-8")
+        self.assertNotIn("Template ZIP", html)
+        self.assertNotIn("Download ZIP", html)
+        self.assertNotIn("Find in folder names", html)
+        self.assertNotIn('name="replace"', html)
+        self.assertIn('id="dry-run"', html)
+        self.assertIn("checked", html)
+        self.assertIn("Grade Checker", html)
+
+    def test_config_lists_grade_checker_and_dry_run_default(self):
         config = self.client.get("/api/config").get_json()
-        self.assertFalse(config["ftp_configured"])
-        self.assertFalse(config["access_required"])
+        self.assertTrue(config["dry_run_default"])
+        self.assertEqual(config["grade_checkers"][0]["prefix"], "RK-")
 
-    def test_preview_and_download(self):
-        preview = self._post_template("/api/preview")
-        self.assertEqual(preview.status_code, 200)
-        body = preview.get_json()
-        self.assertEqual(body["work_orders"], ["CL-Job"])
-        self.assertEqual(body["placeholder_files"], 1)
-        self.assertGreaterEqual(body["output_folders"], 1)
+    def test_removed_endpoints_are_gone(self):
+        self.assertEqual(self.client.post("/api/build").status_code, 404)
+        self.assertEqual(self.client.post("/api/ftp/upload").status_code, 404)
 
-        download = self._post_template("/api/build")
-        self.assertEqual(download.status_code, 200)
-        self.assertIn("Work Orders.zip", download.headers["Content-Disposition"])
-        with zipfile.ZipFile(io.BytesIO(download.data)) as archive:
-            self.assertEqual(archive.read("CL-Job/notes.txt"), b"notes")
-
-    def test_missing_file_is_rejected(self):
-        response = self.client.post("/api/preview", data={"search": "DK-", "replace": "CL-"})
-        self.assertEqual(response.status_code, 400)
-
-    def test_access_token_gates_routes_but_not_health(self):
-        os.environ["APP_ACCESS_TOKEN"] = "local-test-token"
-        self.assertEqual(self.client.get("/health").status_code, 200)
-        self.assertEqual(self.client.get("/").status_code, 401)
-        allowed = self.client.get("/", headers={"X-Access-Token": "local-test-token"})
-        self.assertEqual(allowed.status_code, 200)
-
-    def test_ftp_dry_run_is_the_default_and_makes_no_changes(self):
+    def test_preview_uses_gcs_master_template(self):
         ftp = FakeFTP(_tree())
-        with patch("app.ftp_client.connect_ftp", return_value=ftp):
-            response = self._post_template("/api/ftp/upload", device="T48", project="Project A")
-        self.assertEqual(response.status_code, 200)
+        with patch("app.workflow.fetch_master_template_bytes", return_value=_master_zip()):
+            with patch("app.workflow.connect_ftp", return_value=ftp):
+                response = self._json_post(
+                    "/api/work-orders/preview",
+                    {
+                        "grade_checker_id": "ryan-kolt",
+                        "device": "T48",
+                        "project": "Project A",
+                    },
+                )
+        self.assertEqual(response.status_code, 200, response.get_data(as_text=True))
         body = response.get_json()
-        self.assertTrue(body["dry_run"])
+        self.assertEqual(body["prefix"], "RK-")
+        self.assertEqual(body["rows"][0]["work_order"], "RK-Job")
+        self.assertEqual(body["rows"][0]["action"], "Would Upload")
+
+    def test_dry_run_run_makes_no_ftp_writes(self):
+        ftp = FakeFTP(_tree())
+        with patch("app.workflow.fetch_master_template_bytes", return_value=_master_zip()):
+            with patch("app.workflow.connect_ftp", return_value=ftp):
+                response = self._json_post(
+                    "/api/work-orders/run",
+                    {
+                        "grade_checker_id": "ryan-kolt",
+                        "device": "T48",
+                        "project": "Project A",
+                        "dry_run": True,
+                    },
+                )
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(response.get_json()["dry_run"])
         self.assertEqual(ftp.mkd_calls, [])
         self.assertEqual(ftp.stored, [])
-        self.assertIn("Project A", body["target"])
 
-    def test_ftp_upload_writes_only_when_dry_run_is_off(self):
-        ftp = FakeFTP(_tree())
-        with patch("app.ftp_client.connect_ftp", return_value=ftp):
-            response = self._post_template(
-                "/api/ftp/upload",
-                device="T48",
-                project="Project A",
-                dry_run="false",
+    def test_live_upload_requires_confirmation(self):
+        with patch("app.workflow.fetch_master_template_bytes", return_value=_master_zip()):
+            response = self._json_post(
+                "/api/work-orders/run",
+                {
+                    "grade_checker_id": "ryan-kolt",
+                    "device": "T48",
+                    "project": "Project A",
+                    "dry_run": False,
+                    "confirm_upload": False,
+                },
             )
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("Confirm upload", response.get_json()["error"])
+
+    def test_live_upload_after_confirmation_writes_new_only(self):
+        ftp = FakeFTP(_tree())
+        with patch("app.workflow.fetch_master_template_bytes", return_value=_master_zip()):
+            with patch("app.workflow.connect_ftp", return_value=ftp):
+                response = self._json_post(
+                    "/api/work-orders/run",
+                    {
+                        "grade_checker_id": "ryan-kolt",
+                        "device": "T48",
+                        "project": "Project A",
+                        "dry_run": False,
+                        "confirm_upload": True,
+                    },
+                )
         self.assertEqual(response.status_code, 200)
         self.assertFalse(response.get_json()["dry_run"])
         self.assertTrue(ftp.mkd_calls)
-        self.assertTrue(any(path.endswith("/CL-Job/notes.txt") for path, _data in ftp.stored))
+        self.assertTrue(any(path.endswith("/RK-Job/notes.txt") for path, _data in ftp.stored))
 
-    def test_device_list_and_rejected_project_name(self):
-        ftp = FakeFTP(_tree())
-        with patch("app.ftp_client.connect_ftp", return_value=ftp):
-            devices = self.client.get("/api/ftp/devices")
-            projects = self.client.get("/api/ftp/projects?device=T48")
-            rejected = self.client.get("/api/ftp/projects?device=../T48")
-        self.assertEqual(devices.get_json()["devices"], ["T48"])
-        self.assertEqual(projects.get_json()["projects"], ["Project A"])
-        self.assertEqual(rejected.status_code, 400)
+    def test_app_js_does_not_persist_dry_run(self):
+        js = Path(__file__).resolve().parents[1].joinpath("app", "static", "app.js").read_text(encoding="utf-8")
+        self.assertNotIn('localStorage.setItem("dry', js)
+        self.assertNotIn("localStorage.setItem('dry", js)
+        self.assertIn("dryRunBox.checked = true", js)
 
 
 if __name__ == "__main__":
