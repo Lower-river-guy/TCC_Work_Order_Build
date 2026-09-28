@@ -1,0 +1,95 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{{ app_name }}</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='app.css') }}">
+</head>
+<body>
+  <header class="mast">
+    <p class="brand"><span>&gt;&lt;(((º&gt;</span><span>&gt;&lt;(((º&gt;</span><strong>RK</strong><span>&gt;&lt;(((º&gt;</span></p>
+    <div>
+      <h1>{{ app_name }}</h1>
+      <p class="lede">Build renamed work-order folders, then download the ZIP or send new folders to TCC.</p>
+    </div>
+    <p class="version">v{{ version }}</p>
+  </header>
+
+  <main>
+    <section id="access-panel" class="panel" hidden>
+      <h2>Access</h2>
+      <label>
+        Access token
+        <input id="access-token" type="password" autocomplete="current-password">
+      </label>
+      <button id="save-token" type="button">Save token</button>
+      <p id="access-note" class="note"></p>
+    </section>
+
+    <section class="panel">
+      <h2>1. Template</h2>
+      <form id="build-form">
+        <label>
+          Template ZIP
+          <input id="template" name="template" type="file" accept=".zip,application/zip" required>
+        </label>
+        <div class="split">
+          <label>
+            Find in folder names
+            <input id="search" name="search" type="text" value="{{ default_search }}">
+          </label>
+          <label>
+            Replace with
+            <input id="replace" name="replace" type="text" value="{{ default_replace }}">
+          </label>
+        </div>
+        <p class="note">A folder named Output keeps that name and stays a destination folder. Other folders get a placeholder file containing 11, plus an Output folder.</p>
+        <div class="actions">
+          <button id="preview-button" type="submit">Preview</button>
+          <button id="download-button" type="button">Download ZIP</button>
+        </div>
+      </form>
+    </section>
+
+    <section class="panel">
+      <h2>2. Preview</h2>
+      <dl id="summary" class="summary">
+        <div><dt>Work orders</dt><dd id="count-orders">—</dd></div>
+        <div><dt>Existing files</dt><dd id="count-files">—</dd></div>
+        <div><dt>Placeholders</dt><dd id="count-placeholders">—</dd></div>
+        <div><dt>Output folders</dt><dd id="count-output">—</dd></div>
+      </dl>
+      <pre id="log" class="log">Upload a template ZIP to see the renamed folders.</pre>
+    </section>
+
+    <section class="panel">
+      <h2>3. TCC FTP</h2>
+      <p id="ftp-status" class="note">Checking FTP credentials…</p>
+      <div class="split">
+        <label>
+          Device
+          <select id="device"></select>
+        </label>
+        <label>
+          Project
+          <select id="project"></select>
+        </label>
+      </div>
+      <div class="actions">
+        <button id="load-devices" type="button">Load devices</button>
+        <button id="load-projects" type="button">Load projects</button>
+      </div>
+      <label class="check">
+        <input id="dry-run" type="checkbox" checked>
+        Dry run — list what would upload and do not change TCC
+      </label>
+      <div class="actions">
+        <button id="upload-button" type="button">Run FTP</button>
+      </div>
+      <pre id="ftp-log" class="log">FTP results appear here.</pre>
+    </section>
+  </main>
+  <script src="{{ url_for('static', filename='app.js') }}"></script>
+</body>
+</html>
