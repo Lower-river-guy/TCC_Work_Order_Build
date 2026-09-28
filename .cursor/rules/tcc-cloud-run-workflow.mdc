@@ -1,0 +1,41 @@
+---
+description: TCC Work Order Builder — test, commit, deploy workflow for tcc-work-order-builder
+alwaysApply: true
+---
+
+# TCC Work Order Builder — deploy workflow
+
+Repository: `Lower-river-guy/TCC_Work_Order_Build` only. Do not create duplicate repos.
+
+## Authorized deploy target
+
+- GCP project: `work-projects-486912`
+- Region: `us-west1`
+- Service: `tcc-work-order-builder`
+- URL pattern: `https://tcc-work-order-builder-564809734796.us-west1.run.app`
+
+Deploy completed, tested revisions without asking for deployment approval again.
+
+## Normal workflow (each revision)
+
+1. Implement requested changes.
+2. Run `python -m unittest discover -s tests -t . -v`.
+3. Commit and push to `main` on `Lower-river-guy/TCC_Work_Order_Build` with a versioned message.
+4. Deploy that exact revision to `tcc-work-order-builder` from the repo (Dockerfile / `--source`).
+5. Verify `/health` (version), `/api/config`, and `/` (main UI).
+6. Report: commit SHA, Cloud Run revision name, service URL, test results, verification results.
+
+## Cloud Run settings (keep unless task says otherwise)
+
+- Secrets: `TCC_T48_DEVICE_USER`, `TCC_T48_DEVICE_PASS` (Secret Manager, latest).
+- Env: `GCS_TEMPLATE_BUCKET=trimble-data-bucket-rk`, `GCS_TEMPLATE_OBJECT=tcc-work-order-builder/templates/Work Orders.zip`.
+- Do not put FTP passwords or secrets in git or in the image.
+
+## Still stop and ask before
+
+- Destructive actions.
+- Deleting or replacing existing FTP data (beyond adding new work orders per app rules).
+- Changing unrelated GCP resources, secret **values**, or other Cloud Run services.
+- Genuinely ambiguous targets.
+
+Version bumps, Cloud Build, new Cloud Run revisions, Secret Manager **references**, and IAM needed for this service and GCS template read do not need a separate approval step.
