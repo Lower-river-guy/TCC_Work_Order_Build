@@ -132,7 +132,11 @@ class WebTests(unittest.TestCase):
 
         html = page.data.decode("utf-8")
 
-        self.assertNotIn("Grade Checker", html)
+        self.assertIn("Use Grade Checker's initials for Prefix.", html)
+
+        self.assertIn("push new folders to WorksManager.", html)
+
+        self.assertNotIn("WorksManager on TCC", html)
 
         self.assertIn("Sukut Work Order Builder", html)
 

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import os
 
-APP_VERSION = "0.01.06"
+APP_VERSION = "0.01.07"
 APP_NAME = "Sukut Work Order Builder"
 
 DEFAULT_PREFIX = "RK-"
