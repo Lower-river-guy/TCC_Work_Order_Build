@@ -7,113 +7,206 @@
   <link rel="stylesheet" href="{{ url_for('static', filename='app.css') }}?v={{ version }}">
 </head>
 <body>
-  <header class="mast">
-    <p class="brand"><span>&gt;&lt;(((º&gt;</span><span>&gt;&lt;(((º&gt;</span><strong>RK</strong><span>&gt;&lt;(((º&gt;</span></p>
-    <div>
-      <h1>{{ app_name }}</h1>
-      <p class="lede">Build work orders from a template, custom names, or both, then upload only new folders to TCC.</p>
+  <div class="page-shell">
+    <header class="mast">
+      <div class="mast-top">
+        <div>
+          <h1>Sukut Work Order Builder</h1>
+          <p class="lede">Build and preview work orders, then push new folders to WorksManager on TCC.</p>
+        </div>
+        <p class="version">v{{ version }}</p>
+      </div>
+    </header>
+
+    <div class="work-layout">
+      <aside class="workflow-panel" aria-label="Work Order Steps">
+        <h2>Work Order Steps</h2>
+        <ol class="workflow-steps" id="workflow-steps">
+          <li class="workflow-step" data-step="1">
+            <span class="step-marker" aria-hidden="true">1</span>
+            <div>
+              <p class="step-title">Start Here</p>
+              <p class="step-body">Enter the grade checker's initials in the Prefix box.</p>
+            </div>
+          </li>
+          <li class="workflow-step" data-step="2">
+            <span class="step-marker" aria-hidden="true">2</span>
+            <div>
+              <p class="step-title">Load Device</p>
+              <p class="step-body">Press the button to load and select the device name.</p>
+            </div>
+          </li>
+          <li class="workflow-step" data-step="3">
+            <span class="step-marker" aria-hidden="true">3</span>
+            <div>
+              <p class="step-title">Load Projects</p>
+              <p class="step-body">Press the button to load the available projects.</p>
+            </div>
+          </li>
+          <li class="workflow-step" data-step="4">
+            <span class="step-marker" aria-hidden="true">4</span>
+            <div>
+              <p class="step-title">Configure Work Order</p>
+              <p class="step-body">Choose the required project, template settings, and any other required options.</p>
+            </div>
+          </li>
+          <li class="workflow-step" data-step="5">
+            <span class="step-marker" aria-hidden="true">5</span>
+            <div>
+              <p class="step-title">Preview Work Orders</p>
+              <p class="step-body">Press Preview Work Orders and review the results.</p>
+            </div>
+          </li>
+          <li class="workflow-step" data-step="6">
+            <span class="step-marker" aria-hidden="true">6</span>
+            <div>
+              <p class="step-title">Push to WorksManager</p>
+              <p class="step-body">If the preview is correct, use Confirm Upload to push work orders to WorksManager.</p>
+            </div>
+          </li>
+        </ol>
+      </aside>
+
+      <div class="work-main">
+        <section id="access-panel" class="panel" hidden>
+          <h2>Access</h2>
+          <label>
+            Access token
+            <input id="access-token" type="password" autocomplete="current-password">
+          </label>
+          <button id="save-token" type="button">Save token</button>
+          <p id="access-note" class="note"></p>
+        </section>
+
+        <section class="panel">
+          <h2>Work Order Preset</h2>
+          <fieldset class="work-order-preset-picker">
+            <legend class="visually-hidden">Work Order Preset</legend>
+            <label class="radio">
+              <input type="radio" name="work_order_preset" value="default" checked autocomplete="off">
+              Default
+            </label>
+            <label class="radio">
+              <input type="radio" name="work_order_preset" value="landfill" autocomplete="off">
+              Landfill
+            </label>
+            <label class="radio">
+              <input type="radio" name="work_order_preset" value="residential" autocomplete="off">
+              Residential
+            </label>
+            <label class="radio">
+              <input type="radio" name="work_order_preset" value="solar" autocomplete="off">
+              Solar
+            </label>
+          </fieldset>
+          <p id="work-order-preset-notice" class="preset-notice" hidden></p>
+        </section>
+
+        <section class="panel">
+          <h2>Device &amp; Project Selection</h2>
+          <p id="ftp-status" class="note">Checking server…</p>
+
+          <label>
+            Work Order Prefix
+            <input id="prefix" type="text" value="{{ default_prefix }}" maxlength="50" autocomplete="off">
+          </label>
+
+          <div class="split">
+            <label>
+              Device
+              <select id="device"></select>
+            </label>
+            <label>
+              Project
+              <select id="project"></select>
+            </label>
+          </div>
+          <div class="actions">
+            <button id="load-devices" type="button" class="secondary">Load devices</button>
+            <button id="load-projects" type="button" class="secondary">Load projects</button>
+          </div>
+        </section>
+
+        <section class="panel">
+          <h2>Template Source</h2>
+          <fieldset class="template-source">
+            <legend class="visually-hidden">Template Source</legend>
+            <label class="radio">
+              <input type="radio" name="template_source" value="default" checked autocomplete="off">
+              Default Template
+            </label>
+            <label class="radio">
+              <input type="radio" name="template_source" value="upload" autocomplete="off">
+              Upload Custom ZIP
+            </label>
+            <label class="radio">
+              <input type="radio" name="template_source" value="none" autocomplete="off">
+              No Template — Custom Work Orders Only
+            </label>
+          </fieldset>
+          <label id="custom-template-field" hidden>
+            Upload Custom Work Order Template (.zip)
+            <input id="custom-template" name="custom_template" type="file" accept=".zip,application/zip">
+          </label>
+        </section>
+
+        <section class="panel">
+          <h2>Work Order Configuration</h2>
+          <label>
+            Custom Work Order Names <span class="hint">(optional)</span>
+            <input id="custom-work-order-names" type="text" maxlength="2000" autocomplete="off" placeholder="Test, Test 2, Test 3">
+          </label>
+          <p id="custom-work-order-preview" class="note">Custom work orders: —</p>
+        </section>
+
+        <section class="panel">
+          <h2>Preview</h2>
+          <div class="actions actions--compact">
+            <button id="preview-button" type="button">Preview Work Orders</button>
+          </div>
+          <p id="template-line" class="template-line">Template: —</p>
+          <p id="banner" class="banner" hidden></p>
+          <dl id="totals" class="summary">
+            <div><dt>Total Work Orders</dt><dd id="total-count">—</dd></div>
+            <div><dt>New</dt><dd id="new-count">—</dd></div>
+            <div><dt>Existing / Skipped</dt><dd id="existing-count">—</dd></div>
+          </dl>
+          <div class="table-wrap">
+            <table id="preview-table">
+              <thead>
+                <tr>
+                  <th>Work Order</th>
+                  <th>Source</th>
+                  <th>Status</th>
+                  <th>Action</th>
+                </tr>
+              </thead>
+              <tbody id="preview-body">
+                <tr><td colspan="4" class="empty">Choose template source, prefix, device, and project, then run Preview.</td></tr>
+              </tbody>
+            </table>
+          </div>
+          <pre id="log" class="log"></pre>
+        </section>
+
+        <section class="panel">
+          <h2>Upload to WorksManager</h2>
+          <label class="check dry-run-check">
+            <input id="dry-run" type="checkbox" checked autocomplete="off">
+            Dry Run — Preview only, make no changes to TCC
+          </label>
+          <div class="actions">
+            <button id="action-button" type="button">Run Dry Run</button>
+          </div>
+        </section>
+      </div>
     </div>
-    <p class="version">v{{ version }}</p>
-  </header>
+  </div>
 
-  <main>
-    <section id="access-panel" class="panel" hidden>
-      <h2>Access</h2>
-      <label>
-        Access token
-        <input id="access-token" type="password" autocomplete="current-password">
-      </label>
-      <button id="save-token" type="button">Save token</button>
-      <p id="access-note" class="note"></p>
-    </section>
-
-    <section class="panel">
-      <h2>1. Selection</h2>
-      <p id="ftp-status" class="note">Checking server…</p>
-
-      <fieldset class="template-source">
-        <legend>Template Source</legend>
-        <label class="radio">
-          <input type="radio" name="template_source" value="default" checked autocomplete="off">
-          Default Template
-        </label>
-        <label class="radio">
-          <input type="radio" name="template_source" value="upload" autocomplete="off">
-          Upload Custom ZIP
-        </label>
-        <label class="radio">
-          <input type="radio" name="template_source" value="none" autocomplete="off">
-          No Template — Custom Work Orders Only
-        </label>
-      </fieldset>
-      <label id="custom-template-field" hidden>
-        Upload Custom Work Order Template (.zip)
-        <input id="custom-template" name="custom_template" type="file" accept=".zip,application/zip">
-      </label>
-
-      <label>
-        Work Order Prefix
-        <input id="prefix" type="text" value="{{ default_prefix }}" maxlength="50" autocomplete="off">
-      </label>
-
-      <label>
-        Custom Work Order Names <span class="hint">(optional)</span>
-        <input id="custom-work-order-names" type="text" maxlength="2000" autocomplete="off" placeholder="Test, Test 2, Test 3">
-      </label>
-      <p id="custom-work-order-preview" class="note">Custom work orders: —</p>
-
-      <div class="split">
-        <label>
-          Device
-          <select id="device"></select>
-        </label>
-        <label>
-          Project
-          <select id="project"></select>
-        </label>
-      </div>
-      <div class="actions">
-        <button id="load-devices" type="button">Load devices</button>
-        <button id="load-projects" type="button">Load projects</button>
-      </div>
-
-      <label class="check dry-run-check">
-        <input id="dry-run" type="checkbox" checked autocomplete="off">
-        Dry Run — Preview only, make no changes to TCC
-      </label>
-      <div class="actions">
-        <button id="preview-button" type="button">Preview</button>
-        <button id="action-button" type="button">Run Dry Run</button>
-      </div>
-    </section>
-
-    <section class="panel">
-      <h2>2. Preview</h2>
-      <p id="template-line" class="template-line">Template: —</p>
-      <p id="banner" class="banner" hidden></p>
-      <dl id="totals" class="summary">
-        <div><dt>Total Work Orders</dt><dd id="total-count">—</dd></div>
-        <div><dt>New</dt><dd id="new-count">—</dd></div>
-        <div><dt>Existing / Skipped</dt><dd id="existing-count">—</dd></div>
-      </dl>
-      <div class="table-wrap">
-        <table id="preview-table">
-          <thead>
-            <tr>
-              <th>Work Order</th>
-              <th>Source</th>
-              <th>Status</th>
-              <th>Action</th>
-            </tr>
-          </thead>
-          <tbody id="preview-body">
-            <tr><td colspan="4" class="empty">Choose template source, prefix, device, and project, then run Preview.</td></tr>
-          </tbody>
-        </table>
-      </div>
-      <pre id="log" class="log"></pre>
-    </section>
-  </main>
+  <footer class="site-footer">
+    <p class="brand-footer"><span>&gt;&lt;(((º&gt;</span><span>&gt;&lt;(((º&gt;</span><strong>RK</strong><span>&gt;&lt;(((º&gt;</span></p>
+    <p class="help-line">Need help? <span class="help-icon" aria-hidden="true">?</span> <a href="mailto:rkolt@sukut.com">rkolt@sukut.com</a></p>
+  </footer>
 
   <dialog id="confirm-dialog">
     <form method="dialog" id="confirm-form">
@@ -128,7 +221,7 @@
         <div><dt>Existing Work Orders to Skip</dt><dd id="confirm-existing"></dd></div>
       </dl>
       <div class="actions">
-        <button type="button" id="cancel-upload">Cancel</button>
+        <button type="button" id="cancel-upload" class="secondary">Cancel</button>
         <button type="submit" id="confirm-upload" value="confirm">Confirm Upload</button>
       </div>
     </form>
